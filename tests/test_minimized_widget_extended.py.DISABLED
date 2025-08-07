@@ -1,0 +1,378 @@
+"""
+Extended tests for MinimizedWidget functionality
+"""
+
+import unittest
+import tempfile
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+# Remove direct tkinter import to prevent widget creation issues
+
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from tick_tock_widget.minimized_widget import MinimizedTickTockWidget
+
+
+class TestMinimizedWidgetExtended(unittest.TestCase):
+    """Extended tests for MinimizedTickTockWidget"""
+    
+    def setUp(self):
+        """Set up test environment with comprehensive mocking"""
+        # Set up comprehensive GUI mocking to prevent widget creation
+        self.patches = []
+        
+        # Mock all tkinter components used by MinimizedTickTockWidget
+        self.mock_toplevel = self._setup_patch('tkinter.Toplevel')
+        self.mock_frame = self._setup_patch('tkinter.Frame') 
+        self.mock_label = self._setup_patch('tkinter.Label')
+        self.mock_button = self._setup_patch('tkinter.Button')
+        self.mock_style = self._setup_patch('tkinter.ttk.Style')
+        self.mock_combobox = self._setup_patch('tkinter.ttk.Combobox')
+        
+        # Configure mock returns
+        self.mock_root = MagicMock()
+        self.mock_toplevel.return_value = self.mock_root
+        self.mock_root.winfo_screenwidth.return_value = 1920
+        self.mock_root.winfo_screenheight.return_value = 1080
+        
+        # Mock parent widget
+        self.mock_parent = MagicMock()
+        self.mock_parent.root = MagicMock()
+        
+    def _setup_patch(self, target):
+        """Helper to set up a patch and track it for cleanup"""
+        patch_obj = patch(target)
+        mock_obj = patch_obj.start()
+        mock_obj.return_value = MagicMock()
+        self.patches.append(patch_obj)
+        return mock_obj
+    
+    def tearDown(self):
+        """Clean up patches"""
+        for patch_obj in self.patches:
+            patch_obj.stop()
+    
+    def test_minimized_widget_initialization(self):
+        """Test minimized widget proper initialization"""
+        # Test theme setup  
+        test_theme = {
+            'name': 'Test',
+            'bg': '#000000',
+            'fg': '#FFFFFF',
+            'accent': '#FF0000'
+        }
+        
+        # Mock required dependencies
+        mock_data_manager = MagicMock()
+        mock_on_maximize = MagicMock()
+        
+        minimized = MinimizedTickTockWidget(
+            self.mock_parent, 
+            mock_data_manager, 
+            mock_on_maximize
+        )
+        
+        # Verify initialization
+        self.mock_toplevel.assert_called_once_with(self.mock_parent.root)
+        self.assertIsNotNone(minimized)
+
+    @patch('tkinter.Toplevel')
+    def test_minimized_widget_positioning(self, mock_toplevel):
+        """Test minimized widget positioning functionality"""
+        mock_window = MagicMock()
+        mock_toplevel.return_value = mock_window
+        
+        test_theme = {'name': 'Test', 'bg': '#000000', 'fg': '#FFFFFF', 'accent': '#FF0000'}
+        
+        # Mock screen dimensions
+        mock_window.winfo_screenwidth.return_value = 1920
+        mock_window.winfo_screenheight.return_value = 1080
+        
+        minimized = MinimizedTickTockWidget(self.mock_parent, test_theme)
+        
+        # Verify window positioning was attempted
+        mock_window.geometry.assert_called()
+
+    @patch('tkinter.Toplevel')
+    def test_minimized_widget_always_on_top(self, mock_toplevel):
+        """Test that minimized widget stays on top"""
+        mock_window = MagicMock()
+        mock_toplevel.return_value = mock_window
+        
+        test_theme = {'name': 'Test', 'bg': '#000000', 'fg': '#FFFFFF', 'accent': '#FF0000'}
+        
+        minimized = MinimizedTickTockWidget(self.mock_parent, test_theme)
+        
+        # Verify topmost attribute was set
+        mock_window.attributes.assert_called()
+
+    @patch('tkinter.Toplevel')
+    def test_minimized_widget_theme_application(self, mock_toplevel):
+        """Test theme application to minimized widget"""
+        mock_window = MagicMock()
+        mock_toplevel.return_value = mock_window
+        
+        test_theme = {
+            'name': 'Test',
+            'bg': '#001100',
+            'fg': '#00FF00',
+            'accent': '#00AA00'
+        }
+        
+        minimized = MinimizedTickTockWidget(self.mock_parent, test_theme)
+        
+        # Test theme update
+        new_theme = {
+            'name': 'New',
+            'bg': '#110000',
+            'fg': '#FF0000',
+            'accent': '#AA0000'
+        }
+        
+        if hasattr(minimized, 'update_theme'):
+            minimized.update_theme(new_theme)
+            self.assertEqual(minimized.theme, new_theme)
+
+    @patch('tkinter.Toplevel')
+    def test_minimized_widget_restore_functionality(self, mock_toplevel):
+        """Test restore functionality from minimized state"""
+        mock_window = MagicMock()
+        mock_toplevel.return_value = mock_window
+        
+        test_theme = {'name': 'Test', 'bg': '#000000', 'fg': '#FFFFFF', 'accent': '#FF0000'}
+        
+        # Mock restore callback
+        mock_restore_callback = MagicMock()
+        self.mock_parent.restore = mock_restore_callback
+        
+        minimized = MinimizedTickTockWidget(self.mock_parent, test_theme)
+        
+        # Test restore action (depends on implementation)
+        if hasattr(minimized, 'restore'):
+            minimized.restore()
+            mock_restore_callback.assert_called_once()
+
+    @patch('tkinter.Toplevel')
+    def test_minimized_widget_destruction(self, mock_toplevel):
+        """Test proper cleanup when minimized widget is destroyed"""
+        mock_window = MagicMock()
+        mock_toplevel.return_value = mock_window
+        
+        test_theme = {'name': 'Test', 'bg': '#000000', 'fg': '#FFFFFF', 'accent': '#FF0000'}
+        
+        minimized = MinimizedTickTockWidget(self.mock_parent, test_theme)
+        
+        # Test destruction
+        minimized.destroy()
+        
+        # Verify window was destroyed
+        mock_window.destroy.assert_called_once()
+
+    @patch('tkinter.Toplevel')
+    def test_minimized_widget_drag_functionality(self, mock_toplevel):
+        """Test drag and drop functionality for repositioning"""
+        mock_window = MagicMock()
+        mock_toplevel.return_value = mock_window
+        
+        test_theme = {'name': 'Test', 'bg': '#000000', 'fg': '#FFFFFF', 'accent': '#FF0000'}
+        
+        minimized = MinimizedTickTockWidget(self.mock_parent, test_theme)
+        
+        # Test drag initialization (if implemented)
+        if hasattr(minimized, 'start_x') and hasattr(minimized, 'start_y'):
+            self.assertEqual(minimized.start_x, 0)
+            self.assertEqual(minimized.start_y, 0)
+
+    @patch('tkinter.Toplevel')
+    def test_minimized_widget_error_handling(self, mock_toplevel):
+        """Test error handling during minimized widget operations"""
+        mock_window = MagicMock()
+        mock_toplevel.return_value = mock_window
+        
+        # Mock window creation error
+        mock_toplevel.side_effect = tk.TclError("Window creation failed")
+        
+        test_theme = {'name': 'Test', 'bg': '#000000', 'fg': '#FFFFFF', 'accent': '#FF0000'}
+        
+        # Should handle creation errors gracefully
+        try:
+            minimized = MinimizedTickTockWidget(self.mock_parent, test_theme)
+            # Should not raise exception
+        except tk.TclError:
+            self.fail("MinimizedTickTockWidget should handle TclError gracefully")
+
+    @patch('tkinter.Toplevel')
+    def test_minimized_widget_timer_display(self, mock_toplevel):
+        """Test timer display in minimized widget"""
+        mock_window = MagicMock()
+        mock_toplevel.return_value = mock_window
+        
+        test_theme = {'name': 'Test', 'bg': '#000000', 'fg': '#FFFFFF', 'accent': '#FF0000'}
+        
+        minimized = MinimizedTickTockWidget(self.mock_parent, test_theme)
+        
+        # Test timer update (if implemented)
+        if hasattr(minimized, 'update_timer'):
+            minimized.update_timer("01:23:45")
+            # Should update timer display
+
+    @patch('tkinter.Toplevel')
+    def test_minimized_widget_project_display(self, mock_toplevel):
+        """Test project information display in minimized widget"""
+        mock_window = MagicMock()
+        mock_toplevel.return_value = mock_window
+        
+        test_theme = {'name': 'Test', 'bg': '#000000', 'fg': '#FFFFFF', 'accent': '#FF0000'}
+        
+        minimized = MinimizedTickTockWidget(self.mock_parent, test_theme)
+        
+        # Test project update (if implemented)
+        if hasattr(minimized, 'update_project'):
+            minimized.update_project("Test Project", "Test Sub-Activity")
+            # Should update project display
+
+    @patch('tkinter.Toplevel')
+    def test_minimized_widget_window_decorations(self, mock_toplevel):
+        """Test window decorations removal for clean appearance"""
+        mock_window = MagicMock()
+        mock_toplevel.return_value = mock_window
+        
+        test_theme = {'name': 'Test', 'bg': '#000000', 'fg': '#FFFFFF', 'accent': '#FF0000'}
+        
+        minimized = MinimizedTickTockWidget(self.mock_parent, test_theme)
+        
+        # Verify window decorations were removed
+        mock_window.overrideredirect.assert_called()
+
+    @patch('tkinter.Toplevel')
+    def test_minimized_widget_transparency_support(self, mock_toplevel):
+        """Test transparency support if available"""
+        mock_window = MagicMock()
+        mock_toplevel.return_value = mock_window
+        
+        test_theme = {'name': 'Test', 'bg': '#000000', 'fg': '#FFFFFF', 'accent': '#FF0000'}
+        
+        minimized = MinimizedTickTockWidget(self.mock_parent, test_theme)
+        
+        # Test transparency setting (if supported)
+        if hasattr(minimized, 'set_transparency'):
+            minimized.set_transparency(0.9)
+            # Should set window transparency
+
+    @patch('tkinter.Toplevel')
+    def test_minimized_widget_click_through_prevention(self, mock_toplevel):
+        """Test that minimized widget doesn't interfere with desktop"""
+        mock_window = MagicMock()
+        mock_toplevel.return_value = mock_window
+        
+        test_theme = {'name': 'Test', 'bg': '#000000', 'fg': '#FFFFFF', 'accent': '#FF0000'}
+        
+        minimized = MinimizedTickTockWidget(self.mock_parent, test_theme)
+        
+        # Verify window is interactive (not click-through)
+        # This depends on implementation details
+
+    @patch('tkinter.Toplevel')
+    def test_minimized_widget_multi_monitor_support(self, mock_toplevel):
+        """Test minimized widget behavior on multi-monitor setups"""
+        mock_window = MagicMock()
+        mock_toplevel.return_value = mock_window
+        
+        # Mock multi-monitor dimensions
+        mock_window.winfo_screenwidth.return_value = 3840  # Dual 1920x1080
+        mock_window.winfo_screenheight.return_value = 1080
+        
+        test_theme = {'name': 'Test', 'bg': '#000000', 'fg': '#FFFFFF', 'accent': '#FF0000'}
+        
+        minimized = MinimizedTickTockWidget(self.mock_parent, test_theme)
+        
+        # Should position correctly on multi-monitor setup
+        mock_window.geometry.assert_called()
+
+    @patch('tkinter.Toplevel')
+    def test_minimized_widget_keyboard_shortcuts(self, mock_toplevel):
+        """Test keyboard shortcuts in minimized widget"""
+        mock_window = MagicMock()
+        mock_toplevel.return_value = mock_window
+        
+        test_theme = {'name': 'Test', 'bg': '#000000', 'fg': '#FFFFFF', 'accent': '#FF0000'}
+        
+        minimized = MinimizedTickTockWidget(self.mock_parent, test_theme)
+        
+        # Test keyboard bindings (if implemented)
+        if hasattr(minimized, 'bind_shortcuts'):
+            minimized.bind_shortcuts()
+            # Should bind keyboard shortcuts
+
+    @patch('tkinter.Toplevel')
+    def test_minimized_widget_context_menu(self, mock_toplevel):
+        """Test context menu functionality in minimized widget"""
+        mock_window = MagicMock()
+        mock_toplevel.return_value = mock_window
+        
+        test_theme = {'name': 'Test', 'bg': '#000000', 'fg': '#FFFFFF', 'accent': '#FF0000'}
+        
+        minimized = MinimizedTickTockWidget(self.mock_parent, test_theme)
+        
+        # Test context menu (if implemented)
+        if hasattr(minimized, 'show_context_menu'):
+            mock_event = MagicMock()
+            minimized.show_context_menu(mock_event)
+            # Should show context menu
+
+    @patch('tkinter.Toplevel')
+    def test_minimized_widget_memory_efficiency(self, mock_toplevel):
+        """Test memory efficiency of minimized widget"""
+        mock_window = MagicMock()
+        mock_toplevel.return_value = mock_window
+        
+        test_theme = {'name': 'Test', 'bg': '#000000', 'fg': '#FFFFFF', 'accent': '#FF0000'}
+        
+        # Create and destroy multiple minimized widgets
+        widgets = []
+        for _ in range(10):
+            widget = MinimizedTickTockWidget(self.mock_parent, test_theme)
+            widgets.append(widget)
+        
+        # Destroy all widgets
+        for widget in widgets:
+            widget.destroy()
+        
+        # Should handle multiple create/destroy cycles efficiently
+
+    @patch('tkinter.Toplevel')
+    def test_minimized_widget_state_persistence(self, mock_toplevel):
+        """Test state persistence between minimize/restore cycles"""
+        mock_window = MagicMock()
+        mock_toplevel.return_value = mock_window
+        
+        test_theme = {'name': 'Test', 'bg': '#000000', 'fg': '#FFFFFF', 'accent': '#FF0000'}
+        
+        minimized = MinimizedTickTockWidget(self.mock_parent, test_theme)
+        
+        # Test state saving/loading (if implemented)
+        if hasattr(minimized, 'save_state') and hasattr(minimized, 'load_state'):
+            minimized.save_state()
+            minimized.load_state()
+            # Should maintain state across cycles
+
+    @patch('tkinter.Toplevel')
+    def test_minimized_widget_accessibility_features(self, mock_toplevel):
+        """Test accessibility features in minimized widget"""
+        mock_window = MagicMock()
+        mock_toplevel.return_value = mock_window
+        
+        test_theme = {'name': 'Test', 'bg': '#000000', 'fg': '#FFFFFF', 'accent': '#FF0000'}
+        
+        minimized = MinimizedTickTockWidget(self.mock_parent, test_theme)
+        
+        # Test accessibility features (if implemented)
+        if hasattr(minimized, 'set_accessibility_name'):
+            minimized.set_accessibility_name("Tick-Tock Timer")
+            # Should support screen readers
+
+
+if __name__ == '__main__':
+    unittest.main()

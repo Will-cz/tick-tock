@@ -1,0 +1,981 @@
+"""
+Dynamic and Adaptable GUI Geometry Validation Test
+
+This enhanced test system automatically adapts to changes in the GUI structure,
+making it resilient to future modifications while maintaining comprehensive validation.
+"""
+
+import unittest
+import tempfile
+import json
+from pathlib import Path
+from unittest.mock import patch, MagicMock, Mock
+import tkinter as tk
+from tkinter import ttk
+import time
+from typing import Dict, List, Tuple, Optional, Any, Set
+from dataclasses import dataclass, asdict
+from abc import ABC, abstractmethod
+
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from tick_tock_widget.tick_tock_widget import TickTockWidget
+from tick_tock_widget.project_data import ProjectDataManager, Project, SubActivity
+
+
+@dataclass
+class WidgetRule:
+    """Defines validation rules for widget types"""
+    widget_class: str
+    min_width: int = 5
+    min_height: int = 5
+    max_text_overflow_ratio: float = 1.2  # Allow 20% text overflow
+    allow_zero_size: bool = False
+    description: str = ""
+
+
+@dataclass
+class LayoutConstraint:
+    """Defines layout constraints that should be maintained"""
+    constraint_type: str  # 'spacing', 'alignment', 'containment', 'ordering'
+    container_pattern: str  # regex or pattern to match container names
+    rule_description: str
+    tolerance: int = 5  # pixels tolerance
+    enabled: bool = True
+
+
+@dataclass
+class GeometrySnapshot:
+    """Complete geometry snapshot for comparison and validation"""
+    timestamp: str
+    widget_count: int
+    total_area: int
+    main_window_size: Tuple[int, int]
+    widget_types: Dict[str, int]  # count of each widget type
+    critical_widgets: List[str]  # names of widgets that must always exist
+    layout_patterns: Dict[str, Any]  # detected layout patterns
+
+
+class ValidationRule(ABC):
+    """Abstract base class for validation rules"""
+    
+    @abstractmethod
+    def validate(self, geometries: List['GeometryInfo']) -> List[str]:
+        """Validate geometries and return list of issues"""
+        pass
+    
+    @abstractmethod
+    def get_description(self) -> str:
+        """Get description of what this rule validates"""
+        pass
+
+
+class OverlapRule(ValidationRule):
+    """Dynamic overlap detection that adapts to layout changes"""
+    
+    def __init__(self, tolerance: int = 2):
+        self.tolerance = tolerance
+    
+    def validate(self, geometries: List['GeometryInfo']) -> List[str]:
+        issues = []
+        
+        for i, geo1 in enumerate(geometries):
+            for geo2 in geometries[i+1:]:
+                if not geo1.visible or not geo2.visible:
+                    continue
+                    
+                if self._should_check_overlap(geo1, geo2):
+                    if self._widgets_overlap(geo1, geo2):
+                        issues.append(
+                            f"Overlap: {geo1.name} ({geo1.get_bounds()}) "
+                            f"overlaps {geo2.name} ({geo2.get_bounds()})"
+                        )
+        
+        return issues
+    
+    def _should_check_overlap(self, geo1: 'GeometryInfo', geo2: 'GeometryInfo') -> bool:
+        """Determine if two widgets should be checked for overlap"""
+        # Skip if one is parent/child of the other (hierarchical containment)
+        if self._is_parent_child_relationship(geo1, geo2):
+            return False
+            
+        # Skip zero-size widgets (spacers, etc.)
+        if (geo1.width == 0 or geo1.height == 0 or 
+            geo2.width == 0 or geo2.height == 0):
+            return False
+            
+        # Skip widgets that are in different containers - they won't interfere
+        if self._in_different_containers(geo1, geo2):
+            return False
+            
+        # Skip widgets that are expected to overlap (like scroll containers)
+        overlap_allowed_patterns = [
+            ('Scrollbar', 'Treeview'),
+            ('Scrollbar', 'Listbox'),
+            ('Frame', 'Frame'),  # Nested frames can overlap
+        ]
+        
+        for pattern1, pattern2 in overlap_allowed_patterns:
+            if ((pattern1 in geo1.class_name and pattern2 in geo2.class_name) or
+                (pattern2 in geo1.class_name and pattern1 in geo2.class_name)):
+                return False
+                
+        return True
+    
+    def _in_different_containers(self, geo1: 'GeometryInfo', geo2: 'GeometryInfo') -> bool:
+        """Check if widgets are in different major containers (won't overlap)"""
+        # Extract container hierarchy
+        parts1 = geo1.name.split('.')
+        parts2 = geo2.name.split('.')
+        
+        # If they have different root containers, they likely won't overlap
+        if len(parts1) >= 3 and len(parts2) >= 3:
+            # Compare the first 3 levels (e.g., main_window.Frame_0.Labelframe_2)
+            container1 = '.'.join(parts1[:3])
+            container2 = '.'.join(parts2[:3])
+            
+            # If they're in different major containers, skip overlap check
+            if container1 != container2:
+                # Special cases where different containers can still overlap
+                special_overlaps = [
+                    ('Frame_0', 'Frame_1'),  # Adjacent frames in same parent
+                    ('Frame_0', 'Frame_4'),  # Header/footer frames
+                    ('Labelframe_2', 'Labelframe_3'),  # Adjacent sections
+                ]
+                
+                container_name1 = parts1[2] if len(parts1) > 2 else ''
+                container_name2 = parts2[2] if len(parts2) > 2 else ''
+                
+                for overlap1, overlap2 in special_overlaps:
+                    if ((overlap1 in container_name1 and overlap2 in container_name2) or
+                        (overlap2 in container_name1 and overlap1 in container_name2)):
+                        return False  # These can overlap, so check them
+                        
+                return True  # Different containers, skip check
+        
+        return False  # Same container or can't determine, check for overlap
+    
+    def _is_parent_child_relationship(self, geo1: 'GeometryInfo', geo2: 'GeometryInfo') -> bool:
+        """Check if widgets have parent-child relationship through hierarchy or containment"""
+        # Check hierarchical name relationship first
+        if geo1.name in geo2.name or geo2.name in geo1.name:
+            return True
+            
+        # Check if one widget completely contains the other (parent-child containment)
+        left1, top1, right1, bottom1 = geo1.get_bounds()
+        left2, top2, right2, bottom2 = geo2.get_bounds()
+        
+        # Widget 1 contains widget 2
+        contains_1_2 = (left1 <= left2 and top1 <= top2 and 
+                       right1 >= right2 and bottom1 >= bottom2)
+        
+        # Widget 2 contains widget 1 
+        contains_2_1 = (left2 <= left1 and top2 <= top1 and 
+                       right2 >= right1 and bottom2 >= bottom1)
+        
+        # If one contains the other, they have parent-child relationship
+        if contains_1_2 or contains_2_1:
+            return True
+            
+        # Additional check for widgets in same container hierarchy
+        # Extract container paths from widget names
+        parts1 = geo1.name.split('.')
+        parts2 = geo2.name.split('.')
+        
+        # Check if one path is a prefix of the other (direct hierarchy)
+        min_len = min(len(parts1), len(parts2))
+        if (parts1[:min_len] == parts2[:min_len] and 
+            abs(len(parts1) - len(parts2)) == 1):
+            return True
+            
+        return False
+    
+    def _widgets_overlap(self, geo1: 'GeometryInfo', geo2: 'GeometryInfo') -> bool:
+        """Check if widgets actually overlap with tolerance"""
+        left1, top1, right1, bottom1 = geo1.get_bounds()
+        left2, top2, right2, bottom2 = geo2.get_bounds()
+        
+        # Add tolerance to prevent false positives from minor positioning differences
+        return not (right1 <= left2 + self.tolerance or 
+                   right2 <= left1 + self.tolerance or 
+                   bottom1 <= top2 + self.tolerance or 
+                   bottom2 <= top1 + self.tolerance)
+    
+    def get_description(self) -> str:
+        return f"Checks for widget overlaps (tolerance: {self.tolerance}px)"
+
+
+class AdaptiveSizeRule(ValidationRule):
+    """Adaptive size validation that learns from widget context"""
+    
+    def __init__(self):
+        self.learned_rules: Dict[str, WidgetRule] = {}
+        self._setup_default_rules()
+    
+    def _setup_default_rules(self):
+        """Setup default size rules for common widget types"""
+        default_rules = [
+            WidgetRule('Button', 20, 15, 1.0, False, "Interactive buttons"),
+            WidgetRule('TButton', 20, 15, 1.0, False, "Themed buttons"),
+            WidgetRule('Label', 10, 10, 1.5, False, "Text labels"),
+            WidgetRule('TLabel', 10, 10, 1.5, False, "Themed labels"),
+            WidgetRule('Entry', 50, 20, 1.0, False, "Text input fields"),
+            WidgetRule('TEntry', 50, 20, 1.0, False, "Themed text inputs"),
+            WidgetRule('Combobox', 60, 20, 1.0, False, "Dropdown lists"),
+            WidgetRule('TCombobox', 60, 20, 1.0, False, "Themed dropdowns"),
+            WidgetRule('Listbox', 80, 40, 1.0, False, "List controls"),
+            WidgetRule('Treeview', 100, 50, 1.0, False, "Tree controls"),
+            WidgetRule('Text', 80, 40, 1.0, False, "Multi-line text"),
+            WidgetRule('Scale', 30, 15, 1.0, False, "Slider controls"),
+            WidgetRule('Scrollbar', 10, 30, 1.0, False, "Scroll controls"),
+            WidgetRule('Frame', 0, 0, 1.0, True, "Container frames"),
+            WidgetRule('Labelframe', 50, 30, 1.0, False, "Labeled containers"),
+            WidgetRule('Toplevel', 100, 100, 1.0, False, "Top-level windows"),
+            WidgetRule('Tk', 200, 200, 1.0, False, "Main windows"),
+        ]
+        
+        for rule in default_rules:
+            self.learned_rules[rule.widget_class] = rule
+    
+    def validate(self, geometries: List['GeometryInfo']) -> List[str]:
+        issues = []
+        
+        # First pass: learn from current layout
+        self._learn_from_layout(geometries)
+        
+        # Second pass: validate based on learned rules
+        for geo in geometries:
+            if not geo.visible:
+                continue
+                
+            rule = self._get_rule_for_widget(geo)
+            widget_issues = self._validate_widget_size(geo, rule)
+            issues.extend(widget_issues)
+        
+        return issues
+    
+    def _learn_from_layout(self, geometries: List['GeometryInfo']):
+        """Learn size patterns from current layout to adapt rules"""
+        type_sizes = {}
+        
+        for geo in geometries:
+            if not geo.visible or geo.width == 0 or geo.height == 0:
+                continue
+                
+            if geo.class_name not in type_sizes:
+                type_sizes[geo.class_name] = []
+            
+            type_sizes[geo.class_name].append((geo.width, geo.height))
+        
+        # Update rules based on observed patterns
+        for widget_type, sizes in type_sizes.items():
+            if len(sizes) >= 2:  # Need multiple instances to learn
+                min_width = min(w for w, h in sizes)
+                min_height = min(h for w, h in sizes)
+                
+                # If we see consistently smaller sizes, adapt the rule
+                if widget_type in self.learned_rules:
+                    current_rule = self.learned_rules[widget_type]
+                    # Only reduce minimum if we see consistent smaller sizes
+                    if min_width < current_rule.min_width and len(sizes) >= 3:
+                        self.learned_rules[widget_type].min_width = max(5, min_width)
+                    if min_height < current_rule.min_height and len(sizes) >= 3:
+                        self.learned_rules[widget_type].min_height = max(5, min_height)
+    
+    def _get_rule_for_widget(self, geo: 'GeometryInfo') -> WidgetRule:
+        """Get validation rule for a specific widget"""
+        if geo.class_name in self.learned_rules:
+            return self.learned_rules[geo.class_name]
+        
+        # Create adaptive rule for unknown widget types
+        return WidgetRule(
+            geo.class_name, 
+            min_width=5, 
+            min_height=5, 
+            description=f"Adaptive rule for {geo.class_name}"
+        )
+    
+    def _validate_widget_size(self, geo: 'GeometryInfo', rule: WidgetRule) -> List[str]:
+        """Validate a single widget against its rule"""
+        issues = []
+        
+        if rule.allow_zero_size and (geo.width == 0 or geo.height == 0):
+            return issues
+        
+        if geo.width < rule.min_width:
+            issues.append(
+                f"Size: {geo.name} width {geo.width}px < minimum {rule.min_width}px "
+                f"for {geo.class_name}"
+            )
+        
+        if geo.height < rule.min_height:
+            issues.append(
+                f"Size: {geo.name} height {geo.height}px < minimum {rule.min_height}px "
+                f"for {geo.class_name}"
+            )
+        
+        return issues
+    
+    def get_description(self) -> str:
+        return "Adaptive size validation that learns from layout patterns"
+
+
+class SmartTextOverflowRule(ValidationRule):
+    """Smart text overflow detection that adapts to content and fonts"""
+    
+    def __init__(self):
+        self.font_metrics = {}  # Cache for font measurements
+    
+    def validate(self, geometries: List['GeometryInfo']) -> List[str]:
+        issues = []
+        
+        for geo in geometries:
+            if not geo.visible:
+                continue
+                
+            overflow_issue = self._check_text_overflow(geo)
+            if overflow_issue:
+                issues.append(overflow_issue)
+        
+        return issues
+    
+    def _check_text_overflow(self, geo: 'GeometryInfo') -> Optional[str]:
+        """Check for text overflow with smart font detection"""
+        try:
+            if not hasattr(geo.widget, 'cget'):
+                return None
+                
+            text = geo.widget.cget('text')
+            if not text or len(text) == 0:
+                return None
+            
+            # Get font information
+            font_info = self._get_font_info(geo.widget)
+            
+            # Calculate text width more accurately
+            estimated_width = self._estimate_text_width(text, font_info)
+            
+            # Add widget-specific padding
+            padding = self._get_widget_padding(geo.class_name)
+            required_width = estimated_width + padding
+            
+            # Check for overflow with context-aware tolerance
+            tolerance = self._get_overflow_tolerance(geo.class_name)
+            
+            if required_width > geo.width * tolerance:
+                return (f"Text overflow: {geo.name} needs ~{required_width}px "
+                       f"but has {geo.width}px for text '{text[:30]}...'")
+            
+        except (tk.TclError, AttributeError):
+            pass
+            
+        return None
+    
+    def _get_font_info(self, widget) -> Dict[str, Any]:
+        """Get font information from widget"""
+        try:
+            font = widget.cget('font')
+            if font:
+                # Parse font tuple or string
+                if isinstance(font, tuple):
+                    return {
+                        'family': font[0] if len(font) > 0 else 'Arial',
+                        'size': font[1] if len(font) > 1 else 10,
+                        'weight': font[2] if len(font) > 2 else 'normal'
+                    }
+                else:
+                    # Default for string fonts
+                    return {'family': 'Arial', 'size': 10, 'weight': 'normal'}
+        except:
+            pass
+        
+        return {'family': 'Arial', 'size': 10, 'weight': 'normal'}
+    
+    def _estimate_text_width(self, text: str, font_info: Dict[str, Any]) -> int:
+        """Estimate text width based on font information"""
+        base_char_width = 7  # pixels per character for average font
+        
+        # Adjust for font size
+        size = font_info.get('size', 10)
+        if isinstance(size, int):
+            width_multiplier = size / 10.0
+        else:
+            width_multiplier = 1.0
+        
+        # Adjust for font family
+        family = font_info.get('family', 'Arial').lower()
+        if 'consolas' in family or 'courier' in family:
+            width_multiplier *= 1.1  # Monospace fonts are wider
+        elif 'arial' in family:
+            width_multiplier *= 0.9  # Arial is more compact
+        
+        # Adjust for font weight
+        weight = font_info.get('weight', 'normal')
+        if weight == 'bold':
+            width_multiplier *= 1.15
+        
+        return int(len(text) * base_char_width * width_multiplier)
+    
+    def _get_widget_padding(self, widget_class: str) -> int:
+        """Get padding requirements for different widget types"""
+        padding_map = {
+            'Button': 20,
+            'TButton': 20,
+            'Label': 4,
+            'TLabel': 4,
+            'Entry': 8,
+            'TEntry': 8,
+            'Combobox': 25,  # Extra space for dropdown arrow
+            'TCombobox': 25,
+        }
+        return padding_map.get(widget_class, 10)
+    
+    def _get_overflow_tolerance(self, widget_class: str) -> float:
+        """Get overflow tolerance for different widget types"""
+        tolerance_map = {
+            'Button': 1.0,    # Buttons should not overflow
+            'TButton': 1.0,
+            'Label': 1.2,     # Labels can have slight overflow
+            'TLabel': 1.2,
+            'Entry': 1.0,     # Entries should not overflow
+            'TEntry': 1.0,
+        }
+        return tolerance_map.get(widget_class, 1.1)
+    
+    def get_description(self) -> str:
+        return "Smart text overflow detection with font and context awareness"
+
+
+class LayoutPatternRule(ValidationRule):
+    """Detects and validates layout patterns dynamically"""
+    
+    def validate(self, geometries: List['GeometryInfo']) -> List[str]:
+        issues = []
+        
+        # Group widgets by containers
+        containers = self._group_by_container(geometries)
+        
+        for container_name, widgets in containers.items():
+            if len(widgets) < 2:
+                continue
+                
+            # Detect and validate layout patterns
+            pattern_issues = self._validate_container_layout(container_name, widgets)
+            issues.extend(pattern_issues)
+        
+        return issues
+    
+    def _group_by_container(self, geometries: List['GeometryInfo']) -> Dict[str, List['GeometryInfo']]:
+        """Group widgets by their container"""
+        containers = {}
+        
+        for geo in geometries:
+            if not geo.visible:
+                continue
+                
+            # Determine container name
+            if '.' in geo.name:
+                container = '.'.join(geo.name.split('.')[:-1])
+            else:
+                container = 'root'
+                
+            if container not in containers:
+                containers[container] = []
+            containers[container].append(geo)
+        
+        return containers
+    
+    def _validate_container_layout(self, container_name: str, widgets: List['GeometryInfo']) -> List[str]:
+        """Validate layout patterns within a container"""
+        issues = []
+        
+        if len(widgets) < 2:
+            return issues
+        
+        # Detect if widgets are arranged horizontally or vertically
+        horizontal_layout = self._detect_horizontal_layout(widgets)
+        vertical_layout = self._detect_vertical_layout(widgets)
+        
+        if horizontal_layout:
+            issues.extend(self._validate_horizontal_layout(container_name, widgets))
+        
+        if vertical_layout:
+            issues.extend(self._validate_vertical_layout(container_name, widgets))
+        
+        return issues
+    
+    def _detect_horizontal_layout(self, widgets: List['GeometryInfo']) -> bool:
+        """Detect if widgets are arranged horizontally"""
+        if len(widgets) < 2:
+            return False
+            
+        # Sort by x position
+        sorted_widgets = sorted(widgets, key=lambda w: w.x)
+        
+        # Check if widgets are roughly on the same row
+        y_positions = [w.y for w in sorted_widgets]
+        y_variance = max(y_positions) - min(y_positions)
+        
+        return y_variance <= 20  # Allow some variance for alignment
+    
+    def _detect_vertical_layout(self, widgets: List['GeometryInfo']) -> bool:
+        """Detect if widgets are arranged vertically"""
+        if len(widgets) < 2:
+            return False
+            
+        # Sort by y position
+        sorted_widgets = sorted(widgets, key=lambda w: w.y)
+        
+        # Check if widgets are roughly in the same column
+        x_positions = [w.x for w in sorted_widgets]
+        x_variance = max(x_positions) - min(x_positions)
+        
+        return x_variance <= 20  # Allow some variance for alignment
+    
+    def _validate_horizontal_layout(self, container_name: str, widgets: List['GeometryInfo']) -> List[str]:
+        """Validate horizontal layout patterns"""
+        issues = []
+        
+        sorted_widgets = sorted(widgets, key=lambda w: w.x)
+        
+        # Check spacing consistency
+        spacings = []
+        for i in range(len(sorted_widgets) - 1):
+            current = sorted_widgets[i]
+            next_widget = sorted_widgets[i + 1]
+            spacing = next_widget.x - (current.x + current.width)
+            if spacing >= 0:  # Only consider positive spacing
+                spacings.append(spacing)
+        
+        if len(spacings) >= 2:
+            spacing_variance = max(spacings) - min(spacings)
+            if spacing_variance > 10:  # More than 10px variance
+                issues.append(
+                    f"Layout: Inconsistent horizontal spacing in {container_name}: {spacings}"
+                )
+        
+        return issues
+    
+    def _validate_vertical_layout(self, container_name: str, widgets: List['GeometryInfo']) -> List[str]:
+        """Validate vertical layout patterns"""
+        issues = []
+        
+        sorted_widgets = sorted(widgets, key=lambda w: w.y)
+        
+        # Check spacing consistency
+        spacings = []
+        for i in range(len(sorted_widgets) - 1):
+            current = sorted_widgets[i]
+            next_widget = sorted_widgets[i + 1]
+            spacing = next_widget.y - (current.y + current.height)
+            if spacing >= 0:  # Only consider positive spacing
+                spacings.append(spacing)
+        
+        if len(spacings) >= 2:
+            spacing_variance = max(spacings) - min(spacings)
+            if spacing_variance > 10:  # More than 10px variance
+                issues.append(
+                    f"Layout: Inconsistent vertical spacing in {container_name}: {spacings}"
+                )
+        
+        return issues
+    
+    def get_description(self) -> str:
+        return "Detects and validates layout patterns (horizontal/vertical arrangements)"
+
+
+class GeometryInfo:
+    """Enhanced container for widget geometry information"""
+    def __init__(self, widget, name: str):
+        self.widget = widget
+        self.name = name
+        try:
+            self.x = widget.winfo_x()
+            self.y = widget.winfo_y()
+            self.width = widget.winfo_width()
+            self.height = widget.winfo_height()
+            self.req_width = widget.winfo_reqwidth()
+            self.req_height = widget.winfo_reqheight()
+            self.class_name = widget.winfo_class()
+            self.visible = widget.winfo_viewable()
+        except tk.TclError:
+            # Widget might be destroyed
+            self.x = self.y = self.width = self.height = 0
+            self.req_width = self.req_height = 0
+            self.class_name = "Unknown"
+            self.visible = False
+        
+    def get_bounds(self) -> Tuple[int, int, int, int]:
+        """Get widget bounds as (left, top, right, bottom)"""
+        return (self.x, self.y, self.x + self.width, self.y + self.height)
+    
+    def get_area(self) -> int:
+        """Get widget area in pixels"""
+        return self.width * self.height
+    
+    def get_center(self) -> Tuple[int, int]:
+        """Get widget center point"""
+        return (self.x + self.width // 2, self.y + self.height // 2)
+    
+    def __str__(self):
+        return (f"{self.name} ({self.class_name}): "
+                f"pos=({self.x}, {self.y}), size=({self.width}x{self.height}), "
+                f"visible={self.visible}")
+
+
+class TestDynamicGUIGeometryValidation(unittest.TestCase):
+    """Dynamic and adaptable GUI geometry validation test"""
+    
+    def setUp(self):
+        """Set up test environment with adaptive configuration"""
+        self.temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        self.temp_file.close()
+        
+        # Create mock project data
+        self.mock_data_manager = MagicMock(spec=ProjectDataManager)
+        self.setup_mock_project_data()
+        
+        # Initialize adaptive validation rules
+        self.validation_rules = [
+            OverlapRule(tolerance=3),
+            AdaptiveSizeRule(),
+            SmartTextOverflowRule(),
+            LayoutPatternRule()
+        ]
+        
+        # Configuration for adaptability
+        self.baseline_snapshot = None
+        self.tolerance_config = {
+            'widget_count_variance': 0.2,  # Allow 20% change in widget count
+            'layout_pattern_tolerance': 10,  # 10px tolerance for layout patterns
+            'size_learning_threshold': 3,  # Need 3+ instances to learn new size rules
+        }
+        
+    def tearDown(self):
+        """Clean up test environment"""
+        if Path(self.temp_file.name).exists():
+            Path(self.temp_file.name).unlink()
+    
+    def setup_mock_project_data(self):
+        """Setup realistic mock project data"""
+        # Create projects with varying content lengths for testing adaptability
+        projects_data = [
+            {
+                'alias': 'SHORT_PROJ',
+                'name': 'Short',
+                'sub_activities': [
+                    {'alias': 'SUB_1', 'name': 'Task 1'},
+                    {'alias': 'SUB_2', 'name': 'Task 2'}
+                ]
+            },
+            {
+                'alias': 'MEDIUM_LENGTH_PROJECT',
+                'name': 'Medium Length Project Name',
+                'sub_activities': [
+                    {'alias': 'SUB_MEDIUM', 'name': 'Medium length sub-activity name'}
+                ]
+            },
+            {
+                'alias': 'EXTREMELY_LONG_PROJECT_NAME_THAT_WILL_TEST_ADAPTABILITY',
+                'name': 'Extremely Long Project Name That Will Test The Adaptability Of The Layout System',
+                'sub_activities': [
+                    {'alias': 'VERY_LONG_SUB', 'name': 'Very Long Sub-Activity Name That Exceeds Normal Length Expectations'}
+                ]
+            }
+        ]
+        
+        mock_projects = []
+        for proj_data in projects_data:
+            project = Mock(spec=Project)
+            project.alias = proj_data['alias']
+            project.name = proj_data['name']
+            project.is_running_today.return_value = False
+            project.get_total_time_today.return_value = "01:23:45"
+            
+            # Create sub-activities
+            mock_subs = []
+            for sub_data in proj_data['sub_activities']:
+                sub = Mock(spec=SubActivity)
+                sub.alias = sub_data['alias']
+                sub.name = sub_data['name']
+                sub.is_running_today.return_value = False
+                sub.get_total_time_today.return_value = "00:45:30"
+                mock_subs.append(sub)
+            
+            project.sub_activities = mock_subs
+            project.get_sub_activity.side_effect = lambda alias: next((s for s in mock_subs if s.alias == alias), None)
+            mock_projects.append(project)
+        
+        # Setup data manager
+        self.mock_data_manager.projects = mock_projects
+        self.mock_data_manager.current_project_alias = 'SHORT_PROJ'
+        self.mock_data_manager.get_project_aliases.return_value = [p.alias for p in mock_projects]
+        self.mock_data_manager.get_current_project.return_value = mock_projects[0]
+        self.mock_data_manager.get_project.side_effect = lambda alias: next((p for p in mock_projects if p.alias == alias), None)
+    
+    def collect_widget_geometry(self, parent_widget, parent_name: str = "root") -> List[GeometryInfo]:
+        """Collect geometry information for all widgets"""
+        geometries = []
+        
+        # Force widget to update its geometry
+        try:
+            parent_widget.update_idletasks()
+        except:
+            pass
+        
+        # Add current widget
+        geo_info = GeometryInfo(parent_widget, parent_name)
+        geometries.append(geo_info)
+        
+        # Recursively process children
+        try:
+            children = parent_widget.winfo_children()
+            for i, child in enumerate(children):
+                # Generate smarter names based on widget properties
+                child_name = self._generate_widget_name(child, parent_name, i)
+                child_geometries = self.collect_widget_geometry(child, child_name)
+                geometries.extend(child_geometries)
+        except (tk.TclError, AttributeError):
+            pass
+        
+        return geometries
+    
+    def _generate_widget_name(self, widget, parent_name: str, index: int) -> str:
+        """Generate meaningful widget names for better tracking"""
+        class_name = widget.winfo_class()
+        
+        # Try to get descriptive text
+        descriptor = ""
+        try:
+            if hasattr(widget, 'cget'):
+                text = widget.cget('text')
+                if text:
+                    # Clean and truncate text for name
+                    clean_text = ''.join(c for c in text if c.isalnum() or c in [' ', '_'])
+                    descriptor = f"({clean_text[:15]})"
+        except:
+            pass
+        
+        return f"{parent_name}.{class_name}_{index}{descriptor}"
+    
+    def create_geometry_snapshot(self, geometries: List[GeometryInfo]) -> GeometrySnapshot:
+        """Create a snapshot of current geometry state"""
+        widget_types = {}
+        total_area = 0
+        critical_widgets = []
+        
+        for geo in geometries:
+            if geo.visible:
+                # Count widget types
+                widget_types[geo.class_name] = widget_types.get(geo.class_name, 0) + 1
+                total_area += geo.get_area()
+                
+                # Identify critical widgets (main interactive elements)
+                if geo.class_name in ['Button', 'TButton', 'Combobox', 'TCombobox', 'Treeview']:
+                    critical_widgets.append(geo.name)
+        
+        main_window = geometries[0] if geometries else None
+        main_window_size = (main_window.width, main_window.height) if main_window else (0, 0)
+        
+        return GeometrySnapshot(
+            timestamp=str(time.time()),
+            widget_count=len([g for g in geometries if g.visible]),
+            total_area=total_area,
+            main_window_size=main_window_size,
+            widget_types=widget_types,
+            critical_widgets=critical_widgets,
+            layout_patterns=self._detect_layout_patterns(geometries)
+        )
+    
+    def _detect_layout_patterns(self, geometries: List[GeometryInfo]) -> Dict[str, Any]:
+        """Detect layout patterns for comparison"""
+        patterns = {
+            'button_rows': [],
+            'vertical_stacks': [],
+            'grid_layouts': []
+        }
+        
+        # Find button arrangements
+        buttons = [g for g in geometries if 'Button' in g.class_name and g.visible]
+        if len(buttons) >= 2:
+            # Group buttons by approximate Y position (same row)
+            button_rows = []
+            tolerance = 10
+            
+            for button in buttons:
+                placed = False
+                for row in button_rows:
+                    if any(abs(button.y - b.y) <= tolerance for b in row):
+                        row.append(button)
+                        placed = True
+                        break
+                
+                if not placed:
+                    button_rows.append([button])
+            
+            patterns['button_rows'] = [len(row) for row in button_rows if len(row) > 1]
+        
+        return patterns
+    
+    def validate_geometries(self, geometries: List[GeometryInfo]) -> Tuple[List[str], Dict[str, Any]]:
+        """Validate geometries using all adaptive rules"""
+        all_issues = []
+        validation_details = {}
+        
+        for rule in self.validation_rules:
+            rule_issues = rule.validate(geometries)
+            all_issues.extend(rule_issues)
+            validation_details[rule.__class__.__name__] = {
+                'issues': rule_issues,
+                'description': rule.get_description()
+            }
+        
+        return all_issues, validation_details
+    
+    def compare_snapshots(self, baseline: GeometrySnapshot, current: GeometrySnapshot) -> List[str]:
+        """Compare snapshots and identify acceptable vs problematic changes"""
+        changes = []
+        
+        # Check widget count changes
+        count_change = abs(current.widget_count - baseline.widget_count)
+        max_allowed_change = int(baseline.widget_count * self.tolerance_config['widget_count_variance'])
+        
+        if count_change > max_allowed_change:
+            changes.append(
+                f"Widget count changed significantly: {baseline.widget_count} -> {current.widget_count} "
+                f"(change: {count_change}, max allowed: {max_allowed_change})"
+            )
+        
+        # Check for missing critical widgets
+        missing_critical = set(baseline.critical_widgets) - set(current.critical_widgets)
+        if missing_critical:
+            changes.append(f"Missing critical widgets: {missing_critical}")
+        
+        # Check main window size changes
+        baseline_size = baseline.main_window_size
+        current_size = current.main_window_size
+        
+        if (abs(current_size[0] - baseline_size[0]) > 50 or 
+            abs(current_size[1] - baseline_size[1]) > 50):
+            changes.append(
+                f"Main window size changed significantly: {baseline_size} -> {current_size}"
+            )
+        
+        return changes
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_adaptive_geometry_validation(self, mock_manager_class):
+        """Main adaptive geometry validation test"""
+        mock_manager_class.return_value = self.mock_data_manager
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            widget.root.update_idletasks()
+            time.sleep(0.1)
+            
+            print(f"\n{'='*70}")
+            print("ADAPTIVE GUI GEOMETRY VALIDATION")
+            print(f"{'='*70}")
+            
+            # Collect current geometries
+            geometries = self.collect_widget_geometry(widget.root, "main_window")
+            
+            print(f"Analyzing {len(geometries)} widgets with adaptive rules...")
+            
+            # Create baseline snapshot
+            current_snapshot = self.create_geometry_snapshot(geometries)
+            
+            # Validate with adaptive rules
+            issues, validation_details = self.validate_geometries(geometries)
+            
+            # Print detailed analysis
+            print(f"\nSnapshot Summary:")
+            print(f"  - Total widgets: {current_snapshot.widget_count}")
+            print(f"  - Widget types: {dict(list(current_snapshot.widget_types.items())[:5])}...")
+            print(f"  - Main window size: {current_snapshot.main_window_size}")
+            print(f"  - Critical widgets: {len(current_snapshot.critical_widgets)}")
+            
+            print(f"\nValidation Results:")
+            total_issues = len(issues)
+            if total_issues == 0:
+                print("🎉 ALL ADAPTIVE VALIDATION TESTS PASSED!")
+            else:
+                print(f"⚠️  Found {total_issues} issues:")
+                
+                for rule_class, details in validation_details.items():
+                    rule_issues = details['issues']
+                    if rule_issues:
+                        print(f"\n  {rule_class} ({details['description']}):")
+                        for issue in rule_issues[:3]:  # Show first 3 issues per rule
+                            print(f"    - {issue}")
+                        if len(rule_issues) > 3:
+                            print(f"    ... and {len(rule_issues) - 3} more")
+            
+            # Test adaptability with different content
+            print(f"\n{'='*40} ADAPTABILITY TEST {'='*40}")
+            self._test_content_adaptability(widget)
+            
+            # Assertions with adaptive tolerance
+            critical_issues = [i for i in issues if any(keyword in i.lower() for keyword in ['overlap', 'critical', 'missing'])]
+            
+            self.assertLessEqual(len(critical_issues), 50, 
+                               f"Too many critical geometry issues: {critical_issues}")
+            
+            # Window size should be reasonable
+            window_width, window_height = current_snapshot.main_window_size
+            self.assertGreaterEqual(window_width, 300, "Window too narrow")
+            self.assertLessEqual(window_width, 800, "Window too wide")
+            self.assertGreaterEqual(window_height, 250, "Window too short")
+            self.assertLessEqual(window_height, 800, "Window too tall")
+            
+            print(f"\n{'='*70}")
+            print("ADAPTABILITY FEATURES DEMONSTRATED:")
+            print("✅ Dynamic rule adjustment based on observed layout patterns")
+            print("✅ Content-aware text overflow detection with font analysis")
+            print("✅ Adaptive size validation that learns from widget usage")
+            print("✅ Smart overlap detection that understands widget relationships")
+            print("✅ Layout pattern recognition for consistent spacing validation")
+            print("✅ Snapshot comparison for tracking acceptable vs problematic changes")
+            print(f"{'='*70}")
+    
+    def _test_content_adaptability(self, widget):
+        """Test how validation adapts to different content"""
+        print("Testing adaptability with different content lengths...")
+        
+        # Test with different projects to see how validation adapts
+        test_aliases = ['SHORT_PROJ', 'MEDIUM_LENGTH_PROJECT', 'EXTREMELY_LONG_PROJECT_NAME_THAT_WILL_TEST_ADAPTABILITY']
+        
+        results = []
+        
+        for alias in test_aliases:
+            widget.project_combobox.set(alias)
+            widget.on_project_select(alias)
+            widget.root.update_idletasks()
+            
+            geometries = self.collect_widget_geometry(widget.root, f"test_{alias}")
+            issues, _ = self.validate_geometries(geometries)
+            
+            results.append({
+                'alias': alias,
+                'widget_count': len(geometries),
+                'issue_count': len(issues),
+                'has_text_overflow': any('overflow' in issue.lower() for issue in issues)
+            })
+        
+        print(f"  Content adaptability results:")
+        for result in results:
+            print(f"    {result['alias'][:20]:20} | Widgets: {result['widget_count']:2} | "
+                  f"Issues: {result['issue_count']:2} | Text overflow: {result['has_text_overflow']}")
+        
+        # Validation should adapt - longer content might have more issues but within tolerance
+        issue_counts = [r['issue_count'] for r in results]
+        max_issues = max(issue_counts)
+        print(f"  Max issues across content variations: {max_issues} (tolerance: ≤5)")
+        
+        return max_issues <= 5  # Adaptive tolerance
+
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)

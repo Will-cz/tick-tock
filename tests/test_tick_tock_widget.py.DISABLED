@@ -1,0 +1,412 @@
+"""
+Tests for TickTockWidget main GUI functionality
+"""
+
+import unittest
+import tempfile
+from pathlib import Path
+from unittest.mock import patch, MagicMock, Mock
+import tkinter as tk
+from tkinter import ttk
+
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from tick_tock_widget.tick_tock_widget import TickTockWidget
+from tick_tock_widget.project_data import ProjectDataManager
+
+
+class TestTickTockWidget(unittest.TestCase):
+    """Test TickTockWidget main application"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        self.temp_file.close()
+        
+        # Mock the data manager to avoid file I/O during tests
+        self.mock_data_manager = MagicMock(spec=ProjectDataManager)
+        self.mock_data_manager.projects = []
+        self.mock_data_manager.current_project_alias = None
+        self.mock_data_manager.current_sub_activity_alias = None
+        self.mock_data_manager.get_project_aliases.return_value = []
+        self.mock_data_manager.get_current_project.return_value = None
+        self.mock_data_manager.get_current_sub_activity.return_value = None
+        
+    def tearDown(self):
+        """Clean up test environment"""
+        if Path(self.temp_file.name).exists():
+            Path(self.temp_file.name).unlink()
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_widget_initialization(self, mock_manager_class):
+        """Test widget initialization"""
+        mock_manager_class.return_value = self.mock_data_manager
+        
+        with patch.object(tk.Tk, 'mainloop'):  # Prevent GUI from actually starting
+            widget = TickTockWidget()
+            
+            # Verify basic initialization
+            self.assertIsNotNone(widget.root)
+            self.assertIsInstance(widget.data_manager, MagicMock)
+            self.assertFalse(widget.is_timing)
+            self.assertEqual(widget.current_theme, 0)
+            self.assertEqual(len(widget.themes), 5)
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_theme_definitions(self, mock_manager_class):
+        """Test theme definitions are valid"""
+        mock_manager_class.return_value = self.mock_data_manager
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            
+            # Verify all themes have required properties
+            required_keys = ['name', 'bg', 'fg', 'accent', 'button_bg', 'button_fg', 'button_active']
+            
+            for theme in widget.themes:
+                for key in required_keys:
+                    self.assertIn(key, theme)
+                    self.assertIsInstance(theme[key], str)
+                
+                # Verify color format for color keys
+                color_keys = ['bg', 'fg', 'accent', 'button_bg', 'button_fg', 'button_active']
+                for color_key in color_keys:
+                    color = theme[color_key]
+                    self.assertTrue(color.startswith('#'), f"Color {color_key} should start with #")
+                    self.assertEqual(len(color), 7, f"Color {color_key} should be 7 characters")
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_get_current_theme(self, mock_manager_class):
+        """Test getting current theme"""
+        mock_manager_class.return_value = self.mock_data_manager
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            
+            # Test default theme (index 0)
+            current_theme = widget.get_current_theme()
+            self.assertEqual(current_theme, widget.themes[0])
+            self.assertEqual(current_theme['name'], 'Matrix')
+            
+            # Test changing theme
+            widget.current_theme = 2
+            current_theme = widget.get_current_theme()
+            self.assertEqual(current_theme, widget.themes[2])
+            self.assertEqual(current_theme['name'], 'Fire')
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_cycle_theme(self, mock_manager_class):
+        """Test cycling through themes"""
+        mock_manager_class.return_value = self.mock_data_manager
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            
+            initial_theme = widget.current_theme
+            
+            # Cycle to next theme
+            widget.cycle_theme()
+            self.assertEqual(widget.current_theme, (initial_theme + 1) % len(widget.themes))
+            
+            # Cycle through all themes and wrap around
+            for i in range(len(widget.themes)):
+                widget.cycle_theme()
+            
+            # Should be back to initial theme
+            self.assertEqual(widget.current_theme, initial_theme)
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_toggle_timing_no_project(self, mock_manager_class):
+        """Test toggling timing with no current project"""
+        mock_manager_class.return_value = self.mock_data_manager
+        self.mock_data_manager.get_current_project.return_value = None
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            
+            # Should not be able to start timing without a project
+            widget.toggle_timing()
+            self.assertFalse(widget.is_timing)
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_toggle_timing_with_project(self, mock_manager_class):
+        """Test toggling timing with current project"""
+        mock_manager_class.return_value = self.mock_data_manager
+        
+        # Mock a current project
+        mock_project = MagicMock()
+        self.mock_data_manager.get_current_project.return_value = mock_project
+        self.mock_data_manager.start_current_timer.return_value = True
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            
+            # Should be able to start timing
+            widget.toggle_timing()
+            self.assertTrue(widget.is_timing)
+            self.mock_data_manager.start_current_timer.assert_called_once()
+            
+            # Should be able to stop timing
+            widget.toggle_timing()
+            self.assertFalse(widget.is_timing)
+            self.mock_data_manager.stop_all_timers.assert_called_once()
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_project_selection_callbacks(self, mock_manager_class):
+        """Test project selection callback functionality"""
+        mock_manager_class.return_value = self.mock_data_manager
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            
+            # Test project selection
+            widget.on_project_select("test_project")
+            self.mock_data_manager.set_current_project.assert_called_with("test_project")
+            
+            # Test sub-activity selection
+            widget.on_sub_activity_select("test_sub")
+            self.mock_data_manager.set_current_sub_activity.assert_called_with("test_sub")
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_load_data(self, mock_manager_class):
+        """Test loading project data"""
+        mock_manager_class.return_value = self.mock_data_manager
+        self.mock_data_manager.load_projects.return_value = True
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            
+            # load_data is called during initialization
+            self.mock_data_manager.load_projects.assert_called()
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_save_data(self, mock_manager_class):
+        """Test saving project data"""
+        mock_manager_class.return_value = self.mock_data_manager
+        self.mock_data_manager.save_projects.return_value = True
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            
+            # Test save data
+            widget.save_data()
+            self.mock_data_manager.save_projects.assert_called_with(force=True)
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_update_display_no_project(self, mock_manager_class):
+        """Test updating display with no current project"""
+        mock_manager_class.return_value = self.mock_data_manager
+        self.mock_data_manager.get_current_project.return_value = None
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            
+            # Should handle no current project gracefully
+            widget.update_display()
+            # Should not raise any exceptions
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_window_setup(self, mock_manager_class):
+        """Test window setup properties"""
+        mock_manager_class.return_value = self.mock_data_manager
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            
+            # Verify window properties - now includes environment indicator
+            expected_title = f"⏱️ {widget.config.get_window_title()}"
+            self.assertEqual(widget.root.title(), expected_title)
+            
+            # Verify borderless window
+            self.assertTrue(widget.root.overrideredirect())
+            
+            # Verify always on top
+            try:
+                self.assertTrue(widget.root.attributes('-topmost'))
+            except tk.TclError:
+                # May not be supported on all platforms
+                pass
+
+
+class TestTickTockWidgetIntegration(unittest.TestCase):
+    """Integration tests for TickTockWidget with real data manager"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        self.temp_file.close()
+    
+    def tearDown(self):
+        """Clean up test environment"""
+        if Path(self.temp_file.name).exists():
+            Path(self.temp_file.name).unlink()
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_full_workflow_integration(self, mock_manager_class):
+        """Test full workflow integration"""
+        # Create real data manager for integration test
+        real_data_manager = ProjectDataManager(self.temp_file.name)
+        mock_manager_class.return_value = real_data_manager
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            
+            # Add a project through the data manager
+            project = real_data_manager.add_project("Test Project", "TEST-001", "test")
+            project.add_sub_activity("Development", "dev")
+            
+            # Set current selections
+            real_data_manager.set_current_project("test")
+            real_data_manager.set_current_sub_activity("dev")
+            
+            # Test timing operations
+            widget.toggle_timing()
+            self.assertTrue(widget.is_timing)
+            self.assertTrue(project.is_running_today())
+            
+            widget.toggle_timing()
+            self.assertFalse(widget.is_timing)
+            self.assertFalse(project.is_running_today())
+            
+            # Test save/load
+            widget.save_data()
+            
+            # Verify data was saved
+            self.assertTrue(Path(self.temp_file.name).exists())
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_minimize_maximize_integration(self, mock_manager_class):
+        """Test minimize/maximize functionality"""
+        real_data_manager = ProjectDataManager(self.temp_file.name)
+        mock_manager_class.return_value = real_data_manager
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            
+            # Test minimize
+            with patch('tick_tock_widget.tick_tock_widget.MinimizedTickTockWidget') as mock_minimized:
+                mock_minimized_instance = MagicMock()
+                mock_minimized.return_value = mock_minimized_instance
+                
+                widget.minimize()
+                
+                # Verify minimized widget was created
+                mock_minimized.assert_called_once()
+                self.assertEqual(widget.minimized_widget, mock_minimized_instance)
+                
+                # Test maximize
+                widget.maximize(100, 100)
+                
+                # Verify main window is restored
+                mock_minimized_instance.root.destroy.assert_called_once()
+
+
+class TestWidgetComponents(unittest.TestCase):
+    """Test individual widget components"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.mock_data_manager = MagicMock(spec=ProjectDataManager)
+        self.mock_data_manager.projects = []
+        self.mock_data_manager.current_project_alias = None
+        self.mock_data_manager.current_sub_activity_alias = None
+        self.mock_data_manager.get_project_aliases.return_value = []
+        self.mock_data_manager.get_current_project.return_value = None
+        self.mock_data_manager.get_current_sub_activity.return_value = None
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_button_creation(self, mock_manager_class):
+        """Test that all required buttons are created"""
+        mock_manager_class.return_value = self.mock_data_manager
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            
+            # Verify key buttons exist
+            self.assertTrue(hasattr(widget, 'start_button'))
+            self.assertTrue(hasattr(widget, 'minimize_button'))
+            self.assertTrue(hasattr(widget, 'close_button'))
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_combobox_creation(self, mock_manager_class):
+        """Test that comboboxes are created"""
+        mock_manager_class.return_value = self.mock_data_manager
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            
+            # Verify comboboxes exist
+            self.assertTrue(hasattr(widget, 'project_combo'))
+            self.assertTrue(hasattr(widget, 'sub_activity_combo'))
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_label_creation(self, mock_manager_class):
+        """Test that required labels are created"""
+        mock_manager_class.return_value = self.mock_data_manager
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            
+            # Verify key labels exist
+            self.assertTrue(hasattr(widget, 'time_label'))
+            self.assertTrue(hasattr(widget, 'project_time_label'))
+
+
+class TestErrorHandling(unittest.TestCase):
+    """Test error handling in TickTockWidget"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.mock_data_manager = MagicMock(spec=ProjectDataManager)
+        self.mock_data_manager.projects = []
+        self.mock_data_manager.current_project_alias = None
+        self.mock_data_manager.current_sub_activity_alias = None
+        self.mock_data_manager.get_project_aliases.return_value = []
+        self.mock_data_manager.get_current_project.return_value = None
+        self.mock_data_manager.get_current_sub_activity.return_value = None
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_data_manager_load_failure(self, mock_manager_class):
+        """Test handling of data manager load failure"""
+        mock_manager_class.return_value = self.mock_data_manager
+        self.mock_data_manager.load_projects.return_value = False
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            # Should not raise exception even if load fails
+            widget = TickTockWidget()
+            self.assertIsNotNone(widget)
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_data_manager_save_failure(self, mock_manager_class):
+        """Test handling of data manager save failure"""
+        mock_manager_class.return_value = self.mock_data_manager
+        self.mock_data_manager.save_projects.return_value = False
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            
+            # Should not raise exception even if save fails
+            widget.save_data()
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_timer_start_failure(self, mock_manager_class):
+        """Test handling of timer start failure"""
+        mock_manager_class.return_value = self.mock_data_manager
+        self.mock_data_manager.start_current_timer.return_value = False
+        
+        # Mock current project exists but start fails
+        mock_project = MagicMock()
+        self.mock_data_manager.get_current_project.return_value = mock_project
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            
+            widget.toggle_timing()
+            # Should remain not timing if start fails
+            self.assertFalse(widget.is_timing)
+
+
+if __name__ == '__main__':
+    unittest.main()

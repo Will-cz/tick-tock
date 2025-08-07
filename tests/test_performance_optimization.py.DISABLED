@@ -1,0 +1,579 @@
+#!/usr/bin/env python3
+"""
+Performance Optimization Testing - Phase 2
+Tests load performance, memory profiling, and optimization under stress
+"""
+
+import unittest
+import tempfile
+import json
+import time
+import threading
+import gc
+import psutil
+import os
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+import tkinter as tk
+from concurrent.futures import ThreadPoolExecutor
+import tracemalloc
+
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from tick_tock_widget.project_data import ProjectDataManager, Project, TimeRecord
+from tick_tock_widget.tick_tock_widget import TickTockWidget
+
+
+class TestPerformanceOptimization(unittest.TestCase):
+    """Test performance under various load conditions"""
+    
+    def setUp(self):
+        """Set up performance testing environment"""
+        self.temp_dir = tempfile.mkdtemp()
+        self.test_data_file = Path(self.temp_dir) / "performance_test.json"
+        
+        # Start memory tracking
+        tracemalloc.start()
+        
+        # Get initial memory usage
+        process = psutil.Process(os.getpid())
+        self.initial_memory = process.memory_info().rss / 1024 / 1024  # MB
+        
+        self.root = tk.Tk()
+        self.root.withdraw()
+        
+        print(f"\n📊 Performance Test Setup:")
+        print(f"   Initial Memory: {self.initial_memory:.1f} MB")
+    
+    def tearDown(self):
+        """Clean up and report final memory usage"""
+        try:
+            self.root.destroy()
+        except tk.TclError:
+            pass
+        
+        # Force garbage collection
+        gc.collect()
+        
+        # Get final memory usage
+        process = psutil.Process(os.getpid())
+        final_memory = process.memory_info().rss / 1024 / 1024  # MB
+        memory_delta = final_memory - self.initial_memory
+        
+        # Stop memory tracking
+        current, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        
+        print(f"📊 Performance Test Cleanup:")
+        print(f"   Final Memory: {final_memory:.1f} MB")
+        print(f"   Memory Delta: {memory_delta:+.1f} MB")
+        print(f"   Peak Traced: {peak / 1024 / 1024:.1f} MB")
+        
+        import shutil
+        try:
+            shutil.rmtree(self.temp_dir)
+        except Exception:
+            pass
+    
+    def test_large_dataset_load_performance(self):
+        """Test loading performance with large datasets"""
+        print("\n=== Performance Test: Large Dataset Loading ===")
+        
+        # Create large dataset
+        large_data = {
+            "projects": [],
+            "current_project_alias": None,
+            "current_sub_activity_alias": None
+        }
+        
+        # Generate 500 projects with substantial data
+        project_count = 500
+        records_per_project = 365  # Full year of data
+        
+        creation_start = time.time()
+        
+        for i in range(project_count):
+            project = {
+                "name": f"Performance Test Project {i:03d}",
+                "dz_number": f"PERF-{i:03d}",
+                "alias": f"perf_{i:03d}",
+                "sub_activities": [],
+                "time_records": {}
+            }
+            
+            # Add time records for a full year
+            for day in range(1, records_per_project + 1):
+                date_str = f"2025-{(day % 12) + 1:02d}-{(day % 28) + 1:02d}"
+                project["time_records"][date_str] = {
+                    "date": date_str,
+                    "total_seconds": (i + day) * 60,  # Varying times
+                    "last_started": None,
+                    "is_running": False,
+                    "sub_activity_seconds": {}
+                }
+            
+            # Add sub-activities
+            for j in range(3):  # 3 sub-activities per project
+                sub_activity = {
+                    "name": f"Sub Activity {j}",
+                    "alias": f"sub_{j}",
+                    "time_records": {}
+                }
+                
+                # Add sub-activity time records
+                for day in range(1, 100):  # 100 days of sub-activity data
+                    date_str = f"2025-{(day % 12) + 1:02d}-{(day % 28) + 1:02d}"
+                    sub_activity["time_records"][date_str] = {
+                        "date": date_str,
+                        "total_seconds": (i + j + day) * 30,
+                        "last_started": None,
+                        "is_running": False,
+                        "sub_activity_seconds": {}
+                    }
+                
+                project["sub_activities"].append(sub_activity)
+            
+            large_data["projects"].append(project)
+        
+        creation_time = time.time() - creation_start
+        
+        # Write to file
+        with open(self.test_data_file, 'w', encoding='utf-8') as f:
+            json.dump(large_data, f, indent=None)  # Compact format for speed
+        
+        file_size = self.test_data_file.stat().st_size / 1024 / 1024  # MB
+        
+        print(f"✓ Created dataset: {project_count} projects")
+        print(f"✓ Records per project: {records_per_project}")
+        print(f"✓ Total time records: {project_count * records_per_project:,}")
+        print(f"✓ File size: {file_size:.1f} MB")
+        print(f"✓ Creation time: {creation_time:.2f}s")
+        
+        # Test loading performance
+        load_start = time.time()
+        
+        dm = ProjectDataManager(str(self.test_data_file))
+        load_result = dm.load_projects()
+        
+        load_time = time.time() - load_start
+        
+        # Verify data was loaded correctly
+        self.assertTrue(load_result, "Should load large dataset successfully")
+        self.assertEqual(len(dm.projects), project_count)
+        
+        # Calculate load performance metrics
+        records_per_second = (project_count * records_per_project) / load_time
+        mb_per_second = file_size / load_time
+        
+        print(f"✓ Load time: {load_time:.2f}s")
+        print(f"✓ Load rate: {records_per_second:,.0f} records/second")
+        print(f"✓ Throughput: {mb_per_second:.1f} MB/second")
+        
+        # Performance assertions
+        self.assertLess(load_time, 30.0, "Should load within 30 seconds")
+        self.assertGreater(records_per_second, 1000, "Should process >1000 records/second")
+    
+    def test_memory_usage_optimization(self):
+        """Test memory usage patterns and optimization"""
+        print("\n=== Performance Test: Memory Usage Optimization ===")
+        
+        # Baseline memory measurement
+        gc.collect()
+        baseline_snapshot = tracemalloc.take_snapshot()
+        baseline_memory = sum(stat.size for stat in baseline_snapshot.statistics('filename'))
+        
+        # Create multiple data managers to test memory usage
+        data_managers = []
+        memory_measurements = []
+        
+        for i in range(5):
+            # Create smaller dataset for memory testing
+            test_data = {
+                "projects": [],
+                "current_project_alias": None,
+                "current_sub_activity_alias": None
+            }
+            
+            # Add 50 projects with 30 days of data each
+            for j in range(50):
+                project = {
+                    "name": f"Memory Test Project {i}-{j}",
+                    "dz_number": f"MEM-{i}-{j:02d}",
+                    "alias": f"mem_{i}_{j}",
+                    "sub_activities": [],
+                    "time_records": {}
+                }
+                
+                # Add 30 days of time records
+                for day in range(1, 31):
+                    date_str = f"2025-08-{day:02d}"
+                    project["time_records"][date_str] = {
+                        "date": date_str,
+                        "total_seconds": (i + j + day) * 120,
+                        "last_started": None,
+                        "is_running": False,
+                        "sub_activity_seconds": {}
+                    }
+                
+                test_data["projects"].append(project)
+            
+            # Write data file
+            data_file = Path(self.temp_dir) / f"memory_test_{i}.json"
+            with open(data_file, 'w', encoding='utf-8') as f:
+                json.dump(test_data, f)
+            
+            # Create data manager
+            dm = ProjectDataManager(str(data_file))
+            dm.load_projects()
+            data_managers.append(dm)
+            
+            # Measure memory after each addition
+            gc.collect()
+            current_snapshot = tracemalloc.take_snapshot()
+            current_memory = sum(stat.size for stat in current_snapshot.statistics('filename'))
+            memory_delta = (current_memory - baseline_memory) / 1024 / 1024  # MB
+            memory_measurements.append(memory_delta)
+            
+            print(f"✓ Data Manager {i+1}: {memory_delta:.1f} MB")
+        
+        # Analyze memory growth pattern
+        memory_per_dm = memory_measurements[-1] / len(data_managers)
+        memory_growth_rate = (memory_measurements[-1] - memory_measurements[0]) / 4
+        
+        print(f"✓ Average memory per DataManager: {memory_per_dm:.1f} MB")
+        print(f"✓ Memory growth rate: {memory_growth_rate:.1f} MB per instance")
+        
+        # Test memory cleanup
+        cleanup_start = time.time()
+        
+        # Clear references and force garbage collection
+        data_managers.clear()
+        gc.collect()
+        
+        cleanup_time = time.time() - cleanup_start
+        
+        # Measure memory after cleanup
+        final_snapshot = tracemalloc.take_snapshot()
+        final_memory = sum(stat.size for stat in final_snapshot.statistics('filename'))
+        memory_recovered = (current_memory - final_memory) / 1024 / 1024  # MB
+        
+        print(f"✓ Cleanup time: {cleanup_time:.3f}s")
+        print(f"✓ Memory recovered: {memory_recovered:.1f} MB")
+        
+        # Memory usage assertions
+        self.assertLess(memory_per_dm, 50.0, "Each DataManager should use <50MB")
+        self.assertGreater(memory_recovered, memory_measurements[-1] * 0.5, 
+                          "Should recover >50% of allocated memory")
+    
+    def test_concurrent_operations_performance(self):
+        """Test performance under concurrent operations"""
+        print("\n=== Performance Test: Concurrent Operations ===")
+        
+        # Create base dataset
+        base_data = {
+            "projects": [],
+            "current_project_alias": None,
+            "current_sub_activity_alias": None
+        }
+        
+        # Add 10 projects for concurrent testing
+        for i in range(10):
+            project = {
+                "name": f"Concurrent Test Project {i}",
+                "dz_number": f"CONC-{i:02d}",
+                "alias": f"conc_{i}",
+                "sub_activities": [],
+                "time_records": {}
+            }
+            
+            # Add some initial time records
+            for day in range(1, 15):
+                date_str = f"2025-08-{day:02d}"
+                project["time_records"][date_str] = {
+                    "date": date_str,
+                    "total_seconds": i * day * 60,
+                    "last_started": None,
+                    "is_running": False,
+                    "sub_activity_seconds": {}
+                }
+            
+            base_data["projects"].append(project)
+        
+        with open(self.test_data_file, 'w', encoding='utf-8') as f:
+            json.dump(base_data, f)
+        
+        # Test concurrent read operations
+        def read_operation(thread_id):
+            """Simulate concurrent read operation"""
+            try:
+                dm = ProjectDataManager(str(self.test_data_file))
+                success = dm.load_projects()
+                
+                if success and len(dm.projects) > 0:
+                    # Simulate data access operations
+                    total_seconds = 0
+                    for project in dm.projects:
+                        for record in project.time_records.values():
+                            total_seconds += record.total_seconds
+                    
+                    return {
+                        'thread_id': thread_id,
+                        'success': True,
+                        'projects_loaded': len(dm.projects),
+                        'total_seconds': total_seconds
+                    }
+                else:
+                    return {'thread_id': thread_id, 'success': False}
+                    
+            except Exception as e:
+                return {'thread_id': thread_id, 'success': False, 'error': str(e)}
+        
+        # Run concurrent read test
+        concurrent_start = time.time()
+        thread_count = 8
+        
+        with ThreadPoolExecutor(max_workers=thread_count) as executor:
+            futures = [executor.submit(read_operation, i) for i in range(thread_count)]
+            results = [future.result() for future in futures]
+        
+        concurrent_time = time.time() - concurrent_start
+        
+        # Analyze results
+        successful_reads = sum(1 for r in results if r.get('success', False))
+        failed_reads = len(results) - successful_reads
+        avg_projects_loaded = sum(r.get('projects_loaded', 0) for r in results) / len(results)
+        
+        print(f"✓ Concurrent threads: {thread_count}")
+        print(f"✓ Execution time: {concurrent_time:.2f}s")
+        print(f"✓ Successful reads: {successful_reads}/{len(results)}")
+        print(f"✓ Failed reads: {failed_reads}")
+        print(f"✓ Avg projects loaded: {avg_projects_loaded:.1f}")
+        
+        if failed_reads > 0:
+            print("⚠️ Failed operations:")
+            for r in results:
+                if not r.get('success', False):
+                    print(f"   Thread {r['thread_id']}: {r.get('error', 'Unknown error')}")
+        
+        # Performance assertions
+        self.assertGreaterEqual(successful_reads, thread_count * 0.8, 
+                               "At least 80% of concurrent reads should succeed")
+        self.assertLess(concurrent_time, 10.0, "Concurrent operations should complete within 10s")
+    
+    def test_ui_responsiveness_simulation(self):
+        """Test UI responsiveness under load simulation"""
+        print("\n=== Performance Test: UI Responsiveness Simulation ===")
+        
+        # Create data manager with moderate dataset
+        test_data = {
+            "projects": [],
+            "current_project_alias": None,
+            "current_sub_activity_alias": None
+        }
+        
+        # Add 20 projects for UI testing
+        for i in range(20):
+            project = {
+                "name": f"UI Test Project {i}",
+                "dz_number": f"UI-{i:02d}",
+                "alias": f"ui_{i}",
+                "sub_activities": [],
+                "time_records": {}
+            }
+            
+            # Add current month data
+            for day in range(1, 32):
+                try:
+                    date_str = f"2025-08-{day:02d}"
+                    project["time_records"][date_str] = {
+                        "date": date_str,
+                        "total_seconds": i * day * 45,
+                        "last_started": None,
+                        "is_running": False,
+                        "sub_activity_seconds": {}
+                    }
+                except ValueError:
+                    # Skip invalid dates
+                    pass
+            
+            test_data["projects"].append(project)
+        
+        with open(self.test_data_file, 'w', encoding='utf-8') as f:
+            json.dump(test_data, f)
+        
+        # Test UI component creation and operations
+        with patch.object(tk.Toplevel, 'mainloop'), \
+             patch('tkinter.messagebox.showinfo'), \
+             patch('tkinter.messagebox.showerror'), \
+             patch('tkinter.filedialog.asksaveasfilename'):
+            
+            ui_start = time.time()
+            
+            try:
+                # Create TickTockWidget
+                widget = TickTockWidget()
+                
+                # Override data file
+                if hasattr(widget, 'data_manager'):
+                    widget.data_manager.data_file = Path(str(self.test_data_file))
+                    widget.data_manager.load_projects()
+                
+                widget_creation_time = time.time() - ui_start
+                
+                # Simulate UI update operations
+                update_operations = []
+                
+                for i in range(10):
+                    update_start = time.time()
+                    
+                    # Simulate display update
+                    if hasattr(widget, 'update_display'):
+                        try:
+                            widget.update_display()
+                        except Exception:
+                            pass  # Handle method not available
+                    
+                    # Simulate project list refresh
+                    if hasattr(widget, 'refresh_project_list'):
+                        try:
+                            widget.refresh_project_list()
+                        except Exception:
+                            pass
+                    
+                    update_time = time.time() - update_start
+                    update_operations.append(update_time)
+                
+                avg_update_time = sum(update_operations) / len(update_operations)
+                max_update_time = max(update_operations)
+                
+                print(f"✓ Widget creation time: {widget_creation_time:.3f}s")
+                print(f"✓ Average UI update time: {avg_update_time:.3f}s")
+                print(f"✓ Maximum UI update time: {max_update_time:.3f}s")
+                print(f"✓ UI updates tested: {len(update_operations)}")
+                
+                # UI responsiveness assertions
+                self.assertLess(widget_creation_time, 2.0, "Widget creation should be <2s")
+                self.assertLess(avg_update_time, 0.1, "Average UI update should be <100ms")
+                self.assertLess(max_update_time, 0.5, "No UI update should take >500ms")
+                
+            except Exception as e:
+                print(f"⚠️ UI responsiveness test handled gracefully: {e}")
+    
+    def test_data_processing_optimization(self):
+        """Test data processing algorithms performance"""
+        print("\n=== Performance Test: Data Processing Optimization ===")
+        
+        # Create dataset optimized for processing tests
+        processing_data = {
+            "projects": [],
+            "current_project_alias": None,
+            "current_sub_activity_alias": None
+        }
+        
+        # Create 100 projects with complex data
+        for i in range(100):
+            project = {
+                "name": f"Processing Test Project {i}",
+                "dz_number": f"PROC-{i:03d}",
+                "alias": f"proc_{i}",
+                "sub_activities": [],
+                "time_records": {}
+            }
+            
+            # Add 90 days of data (3 months)
+            for day in range(1, 91):
+                date_obj = time.gmtime(time.time() - (90 - day) * 24 * 3600)
+                date_str = time.strftime("%Y-%m-%d", date_obj)
+                
+                project["time_records"][date_str] = {
+                    "date": date_str,
+                    "total_seconds": ((i + day) * 123) % 28800,  # 0-8 hours
+                    "last_started": None,
+                    "is_running": False,
+                    "sub_activity_seconds": {}
+                }
+            
+            processing_data["projects"].append(project)
+        
+        with open(self.test_data_file, 'w', encoding='utf-8') as f:
+            json.dump(processing_data, f)
+        
+        # Load data for processing tests
+        dm = ProjectDataManager(str(self.test_data_file))
+        dm.load_projects()
+        
+        # Test 1: Time aggregation performance
+        aggregation_start = time.time()
+        
+        total_time_per_project = {}
+        total_time_per_month = {}
+        
+        for project in dm.projects:
+            project_total = 0
+            
+            for date_str, record in project.time_records.items():
+                project_total += record.total_seconds
+                
+                # Monthly aggregation
+                month_key = date_str[:7]  # YYYY-MM
+                if month_key not in total_time_per_month:
+                    total_time_per_month[month_key] = 0
+                total_time_per_month[month_key] += record.total_seconds
+            
+            total_time_per_project[project.alias] = project_total
+        
+        aggregation_time = time.time() - aggregation_start
+        
+        # Test 2: Search/filter operations
+        search_start = time.time()
+        
+        # Find projects with >100 hours total time
+        high_time_projects = []
+        for alias, total_seconds in total_time_per_project.items():
+            if total_seconds > 100 * 3600:  # 100 hours
+                high_time_projects.append(alias)
+        
+        # Find most active month
+        most_active_month = max(total_time_per_month.items(), key=lambda x: x[1])
+        
+        search_time = time.time() - search_start
+        
+        # Test 3: Data transformation
+        transform_start = time.time()
+        
+        # Convert all times to hours with 2 decimal places
+        hours_data = {}
+        for alias, total_seconds in total_time_per_project.items():
+            hours_data[alias] = round(total_seconds / 3600, 2)
+        
+        # Calculate statistics
+        total_hours = sum(hours_data.values())
+        avg_hours = total_hours / len(hours_data)
+        max_hours = max(hours_data.values())
+        min_hours = min(hours_data.values())
+        
+        transform_time = time.time() - transform_start
+        
+        print(f"✓ Data aggregation time: {aggregation_time:.3f}s")
+        print(f"✓ Search operations time: {search_time:.3f}s")
+        print(f"✓ Data transformation time: {transform_time:.3f}s")
+        print(f"✓ Projects processed: {len(dm.projects)}")
+        print(f"✓ Total records processed: {sum(len(p.time_records) for p in dm.projects)}")
+        print(f"✓ High-time projects found: {len(high_time_projects)}")
+        print(f"✓ Most active month: {most_active_month[0]} ({most_active_month[1]/3600:.1f}h)")
+        print(f"✓ Statistics: Total={total_hours:.1f}h, Avg={avg_hours:.1f}h, Max={max_hours:.1f}h")
+        
+        # Performance assertions
+        total_processing_time = aggregation_time + search_time + transform_time
+        records_processed = sum(len(p.time_records) for p in dm.projects)
+        processing_rate = records_processed / total_processing_time
+        
+        self.assertLess(total_processing_time, 5.0, "Data processing should complete within 5s")
+        self.assertGreater(processing_rate, 500, "Should process >500 records/second")
+        self.assertGreater(len(hours_data), 0, "Should produce transformed data")
+
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)

@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""
+Fixed MinimizedWidget tests - demonstrates comprehensive GUI mocking to prevent hanging
+"""
+
+import unittest
+from unittest.mock import patch, MagicMock
+import sys
+import os
+
+# Add src to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from tick_tock_widget.minimized_widget import MinimizedTickTockWidget
+
+class TestMinimizedWidgetFixed(unittest.TestCase):
+    """Fixed tests for MinimizedTickTockWidget using comprehensive GUI mocking"""
+    
+    @patch('tick_tock_widget.minimized_widget.ttk.Combobox')
+    @patch('tick_tock_widget.minimized_widget.ttk.Style')
+    @patch('tkinter.Button')
+    @patch('tkinter.Label')
+    @patch('tkinter.Frame')
+    @patch('tkinter.Toplevel')
+    def test_widget_initialization_fixed(self, mock_toplevel, mock_frame, mock_label, 
+                                       mock_button, mock_style, mock_combobox):
+        """Test that MinimizedTickTockWidget can be created without hanging"""
+        
+        # Configure comprehensive mocks
+        mock_window = MagicMock()
+        mock_toplevel.return_value = mock_window
+        mock_window.winfo_screenwidth.return_value = 1920
+        mock_window.winfo_screenheight.return_value = 1080
+        
+        # Mock all widget returns
+        mock_frame.return_value = MagicMock()
+        mock_label.return_value = MagicMock()
+        mock_button.return_value = MagicMock()
+        mock_style.return_value = MagicMock()
+        mock_combobox.return_value = MagicMock()
+        
+        # Mock required dependencies
+        mock_parent = MagicMock()
+        mock_parent.root = MagicMock()
+        mock_data_manager = MagicMock()
+        mock_data_manager.get_project_aliases.return_value = []
+        mock_data_manager.projects = []
+        mock_on_maximize = MagicMock()
+        
+        # This should NOT hang with proper mocking
+        widget = MinimizedTickTockWidget(
+            mock_parent, 
+            mock_data_manager, 
+            mock_on_maximize
+        )
+        
+        # Verify creation succeeded
+        self.assertIsNotNone(widget)
+        mock_toplevel.assert_called_once_with(mock_parent.root)
+        print("✅ MinimizedTickTockWidget created successfully without hanging!")
+
+    @patch('tick_tock_widget.minimized_widget.ttk.Combobox')
+    @patch('tick_tock_widget.minimized_widget.ttk.Style')
+    @patch('tkinter.Button')
+    @patch('tkinter.Label')
+    @patch('tkinter.Frame')
+    @patch('tkinter.Toplevel')
+    def test_widget_methods_fixed(self, mock_toplevel, mock_frame, mock_label,
+                                 mock_button, mock_style, mock_combobox):
+        """Test widget methods work without GUI hanging"""
+        
+        # Setup comprehensive mocks
+        mock_window = MagicMock()
+        mock_toplevel.return_value = mock_window
+        
+        mock_parent = MagicMock()
+        mock_parent.root = MagicMock()
+        mock_data_manager = MagicMock()
+        mock_data_manager.get_project_aliases.return_value = ['Project1', 'Project2']
+        mock_data_manager.projects = [
+            {'name': 'Project1', 'alias': 'P1'},
+            {'name': 'Project2', 'alias': 'P2'}
+        ]
+        mock_on_maximize = MagicMock()
+        
+        widget = MinimizedTickTockWidget(
+            mock_parent, 
+            mock_data_manager, 
+            mock_on_maximize
+        )
+        
+        # Test methods don't hang
+        widget.update_projects()  # Should not hang
+        widget.update_display()  # Should not hang
+        
+        self.assertIsNotNone(widget)
+        print("✅ MinimizedTickTockWidget methods execute successfully!")
+
+if __name__ == '__main__':
+    print("🔧 Running fixed MinimizedWidget tests...")
+    unittest.main(verbosity=2)

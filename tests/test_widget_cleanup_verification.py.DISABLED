@@ -1,0 +1,263 @@
+"""
+Test Widget Cleanup Verification
+
+This test module verifies that all test methods properly clean up widget windows
+and don't leave dangling tkinter windows open after test completion.
+"""
+
+import unittest
+import tempfile
+import json
+import os
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+
+# Import the modules we're testing
+from tick_tock_widget import TickTockWidget
+from tick_tock_widget.project_management import ProjectManagementWindow
+from tick_tock_widget.minimized_widget import MinimizedTickTockWidget
+
+
+class TestWidgetCleanupVerification(unittest.TestCase):
+    """Test to verify proper widget cleanup in all test methods"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        self.temp_file.close()
+        
+        # Create test data
+        test_data = {
+            "projects": [
+                {
+                    "name": "Test Project",
+                    "alias": "TP",
+                    "description": "Test project",
+                    "time_records": [],
+                    "metadata": {},
+                    "sub_activities": [
+                        {"name": "Sub Activity", "alias": "SA", "metadata": {}}
+                    ]
+                }
+            ]
+        }
+        
+        with open(self.temp_file.name, 'w', encoding='utf-8') as f:
+            json.dump(test_data, f)
+        
+        self.test_env = {'TICK_TOCK_DATA_FILE': self.temp_file.name}
+        
+        # Track any widgets created for cleanup
+        self.created_widgets = []
+        
+    def tearDown(self):
+        """Clean up test environment and verify no dangling widgets"""
+        # Clean up any widgets created during tests
+        for widget in self.created_widgets:
+            try:
+                if hasattr(widget, 'close_app'):
+                    widget.close_app()
+                elif hasattr(widget, 'root') and hasattr(widget.root, 'destroy'):
+                    widget.root.destroy()
+            except Exception:
+                pass  # Widget might already be destroyed
+        
+        # Clean up temp file
+        try:
+            Path(self.temp_file.name).unlink()
+        except FileNotFoundError:
+            pass
+    
+    def test_tick_tock_widget_with_mocked_root(self):
+        """Test TickTockWidget with properly mocked tkinter.Tk"""
+        with patch.dict(os.environ, self.test_env):
+            with patch('tkinter.Tk') as mock_tk:
+                mock_root = MagicMock()
+                mock_tk.return_value = mock_root
+                
+                # Mock all the necessary tkinter components
+                with patch('tkinter.Frame'), \
+                     patch('tkinter.Label'), \
+                     patch('tkinter.Button'), \
+                     patch('tkinter.ttk.Combobox'), \
+                     patch('tkinter.Canvas'), \
+                     patch('tkinter.Scrollbar'), \
+                     patch.object(TickTockWidget, 'run'):
+                    
+                    widget = TickTockWidget()
+                    self.created_widgets.append(widget)
+                    
+                    # Verify widget was created without actual windows
+                    self.assertIsNotNone(widget)
+                    self.assertIsNotNone(widget.root)
+                    
+                    # Verify mock was called (tkinter.Tk was mocked)
+                    mock_tk.assert_called_once()
+                    
+                    # Test widget cleanup
+                    widget.close_app()
+                    
+                    # Verify destroy was called on the mock root
+                    mock_root.destroy.assert_called()
+    
+    def test_project_management_window_with_mocked_toplevel(self):
+        """Test ProjectManagementWindow with properly mocked tkinter.Toplevel"""
+        with patch.dict(os.environ, self.test_env):
+            with patch('tkinter.Toplevel') as mock_toplevel:
+                mock_window = MagicMock()
+                mock_toplevel.return_value = mock_window
+                
+                # Mock necessary components
+                with patch('tkinter.Frame'), \
+                     patch('tkinter.Label'), \
+                     patch('tkinter.Button'), \
+                     patch('tkinter.Entry'), \
+                     patch('tkinter.Text'), \
+                     patch('tkinter.Listbox'), \
+                     patch('tkinter.ttk.Combobox'):
+                    
+                    mock_parent = MagicMock()
+                    from tick_tock_widget.project_data import ProjectDataManager
+                    data_manager = ProjectDataManager(self.temp_file.name)
+                    
+                    pm_window = ProjectManagementWindow(mock_parent, data_manager)
+                    
+                    # Verify window was created without actual windows
+                    self.assertIsNotNone(pm_window)
+                    
+                    # Verify mock was called (tkinter.Toplevel was mocked)
+                    mock_toplevel.assert_called_once()
+                    
+                    # Test window cleanup
+                    if hasattr(pm_window, 'close'):
+                        pm_window.close()
+                    elif hasattr(pm_window, 'window') and hasattr(pm_window.window, 'destroy'):
+                        pm_window.window.destroy()
+                    
+                    # Verify destroy was called on the mock window
+                    mock_window.destroy.assert_called()
+    
+    def test_minimized_widget_with_mocked_toplevel(self):
+        """Test MinimizedTickTockWidget with properly mocked tkinter.Toplevel"""
+        with patch.dict(os.environ, self.test_env):
+            with patch('tkinter.Toplevel') as mock_toplevel:
+                mock_window = MagicMock()
+                mock_toplevel.return_value = mock_window
+                
+                # Mock necessary components
+                with patch('tkinter.Label'), \
+                     patch('tkinter.Button'):
+                    
+                    mock_parent = MagicMock()
+                    mock_callback = MagicMock()
+                    
+                    minimized_widget = MinimizedTickTockWidget(
+                        mock_parent, mock_callback, "Test Project", "Test Sub"
+                    )
+                    
+                    # Verify widget was created without actual windows
+                    self.assertIsNotNone(minimized_widget)
+                    
+                    # Verify mock was called (tkinter.Toplevel was mocked)
+                    mock_toplevel.assert_called_once()
+                    
+                    # Test widget cleanup
+                    if hasattr(minimized_widget, 'root') and hasattr(minimized_widget.root, 'destroy'):
+                        minimized_widget.root.destroy()
+                    
+                    # Verify destroy was called on the mock window
+                    mock_window.destroy.assert_called()
+    
+    def test_comprehensive_widget_lifecycle(self):
+        """Test complete widget lifecycle with proper cleanup"""
+        with patch.dict(os.environ, self.test_env):
+            # Mock all tkinter components to prevent real window creation
+            with patch('tkinter.Tk') as mock_tk, \
+                 patch('tkinter.Toplevel') as mock_toplevel, \
+                 patch('tkinter.Frame'), \
+                 patch('tkinter.Label'), \
+                 patch('tkinter.Button'), \
+                 patch('tkinter.Entry'), \
+                 patch('tkinter.Text'), \
+                 patch('tkinter.Listbox'), \
+                 patch('tkinter.Canvas'), \
+                 patch('tkinter.Scrollbar'), \
+                 patch('tkinter.ttk.Combobox'), \
+                 patch.object(TickTockWidget, 'run'):
+                
+                mock_root = MagicMock()
+                mock_tk.return_value = mock_root
+                
+                mock_window = MagicMock()
+                mock_toplevel.return_value = mock_window
+                
+                # Create main widget
+                widget = TickTockWidget()
+                self.created_widgets.append(widget)
+                
+                # Simulate opening project management window
+                from tick_tock_widget.project_data import ProjectDataManager
+                data_manager = ProjectDataManager(self.temp_file.name)
+                pm_window = ProjectManagementWindow(widget.root, data_manager)
+                
+                # Simulate opening minimized widget
+                minimized_widget = MinimizedTickTockWidget(
+                    widget.root, lambda: None, "Test Project", "Test Sub"
+                )
+                
+                # Verify all widgets were created with mocks
+                self.assertIsNotNone(widget)
+                self.assertIsNotNone(pm_window)
+                self.assertIsNotNone(minimized_widget)
+                
+                # Test cleanup sequence
+                # 1. Close minimized widget
+                if hasattr(minimized_widget, 'root'):
+                    minimized_widget.root.destroy()
+                
+                # 2. Close project management window
+                if hasattr(pm_window, 'window'):
+                    pm_window.window.destroy()
+                elif hasattr(pm_window, 'close'):
+                    pm_window.close()
+                
+                # 3. Close main widget
+                widget.close_app()
+                
+                # Verify all destroy methods were called
+                mock_root.destroy.assert_called()
+                # mock_window.destroy may be called multiple times for different windows
+                self.assertTrue(mock_window.destroy.called)
+    
+    def test_widget_cleanup_best_practices(self):
+        """Test demonstrating best practices for widget cleanup in tests"""
+        with patch.dict(os.environ, self.test_env):
+            with patch('tkinter.Tk') as mock_tk:
+                mock_root = MagicMock()
+                mock_tk.return_value = mock_root
+                
+                with patch.object(TickTockWidget, 'run'):
+                    # Best practice: Always use context managers or try/finally
+                    widget = None
+                    try:
+                        widget = TickTockWidget()
+                        self.created_widgets.append(widget)
+                        
+                        # Perform tests...
+                        self.assertIsNotNone(widget)
+                        self.assertIsNotNone(widget.root)
+                        
+                    finally:
+                        # Best practice: Always cleanup in finally block
+                        if widget:
+                            try:
+                                widget.close_app()
+                            except Exception:
+                                pass  # Already cleaned up
+                    
+                    # Verify cleanup occurred
+                    mock_root.destroy.assert_called()
+
+
+if __name__ == '__main__':
+    unittest.main()

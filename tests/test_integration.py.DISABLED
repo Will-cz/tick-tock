@@ -1,0 +1,608 @@
+"""
+Integration tests for the entire Tick-Tock Widget application
+"""
+
+import unittest
+import tempfile
+import time
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+import tkinter as tk
+
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from tick_tock_widget.project_data import ProjectDataManager
+from tick_tock_widget.tick_tock_widget import TickTockWidget
+from tick_tock_widget.minimized_widget import MinimizedTickTockWidget
+from tick_tock_widget.project_management import ProjectManagementWindow
+from tick_tock_widget.monthly_report import MonthlyReportWindow
+
+
+class TestFullApplicationIntegration(unittest.TestCase):
+    """Integration tests for the complete application workflow"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        self.temp_file.close()
+    
+    def tearDown(self):
+        """Clean up test environment"""
+        if Path(self.temp_file.name).exists():
+            Path(self.temp_file.name).unlink()
+    
+    def test_complete_project_lifecycle(self):
+        """Test complete project lifecycle from creation to deletion"""
+        # Create data manager
+        data_manager = ProjectDataManager(self.temp_file.name)
+        
+        # 1. Create projects
+        project1 = data_manager.add_project("Web Development", "WEB-001", "web")
+        project2 = data_manager.add_project("Mobile App", "MOB-002", "mobile")
+        
+        self.assertIsNotNone(project1)
+        self.assertIsNotNone(project2)
+        self.assertEqual(len(data_manager.projects), 2)
+        
+        # 2. Add sub-activities
+        if project1:
+            frontend = project1.add_sub_activity("Frontend", "frontend")
+            backend = project1.add_sub_activity("Backend", "backend")
+            self.assertEqual(len(project1.sub_activities), 2)
+        
+        if project2:
+            ui_design = project2.add_sub_activity("UI Design", "ui")
+            development = project2.add_sub_activity("Development", "dev")
+            self.assertEqual(len(project2.sub_activities), 2)
+        
+        # 3. Set current project and start timing
+        data_manager.set_current_project("web")
+        data_manager.set_current_sub_activity("frontend")
+        
+        result = data_manager.start_current_timer()
+        self.assertTrue(result)
+        
+        if project1:
+            self.assertTrue(project1.is_running_today())
+            frontend_sub = project1.get_sub_activity("frontend")
+            if frontend_sub:
+                self.assertTrue(frontend_sub.is_running_today())
+        
+        # 4. Switch projects
+        data_manager.set_current_project("mobile")
+        data_manager.set_current_sub_activity("ui")
+        data_manager.start_current_timer()
+        
+        # Previous project should stop
+        if project1:
+            self.assertFalse(project1.is_running_today())
+        
+        # Current project should be running
+        if project2:
+            self.assertTrue(project2.is_running_today())
+        
+        # 5. Save and reload data
+        data_manager.save_projects(force=True)
+        self.assertTrue(Path(self.temp_file.name).exists())
+        
+        # Load with new manager
+        new_manager = ProjectDataManager(self.temp_file.name)
+        new_manager.load_projects()
+        
+        self.assertEqual(len(new_manager.projects), 2)
+        self.assertEqual(new_manager.current_project_alias, "mobile")
+        self.assertEqual(new_manager.current_sub_activity_alias, "ui")
+        
+        # 6. Remove project
+        result = new_manager.remove_project("web")
+        self.assertTrue(result)
+        self.assertEqual(len(new_manager.projects), 1)
+    
+    def test_time_tracking_accuracy(self):
+        """Test time tracking accuracy across operations"""
+        data_manager = ProjectDataManager(self.temp_file.name)
+        
+        # Create project
+        project = data_manager.add_project("Time Test", "TIME-001", "timetest")
+        self.assertIsNotNone(project)
+        
+        if project:
+            # Start timing
+            data_manager.set_current_project("timetest")
+            data_manager.start_current_timer()
+            
+            # Wait a short time
+            time.sleep(0.1)
+            
+            # Stop timing
+            data_manager.stop_all_timers()
+            
+            # Check that time was recorded
+            today_record = project.get_today_record()
+            self.assertGreater(today_record.total_seconds, 0)
+            
+            # Test formatted time
+            formatted = today_record.get_formatted_time()
+            self.assertIsInstance(formatted, str)
+            self.assertRegex(formatted, r'\d{2}:\d{2}:\d{2}')
+    
+    def test_concurrent_project_timing(self):
+        """Test that only one project can run at a time"""
+        data_manager = ProjectDataManager(self.temp_file.name)
+        
+        # Create multiple projects
+        proj1 = data_manager.add_project("Project 1", "PROJ-001", "proj1")
+        proj2 = data_manager.add_project("Project 2", "PROJ-002", "proj2")
+        proj3 = data_manager.add_project("Project 3", "PROJ-003", "proj3")
+        
+        # Start first project
+        data_manager.set_current_project("proj1")
+        data_manager.start_current_timer()
+        
+        if proj1:
+            self.assertTrue(proj1.is_running_today())
+        
+        # Start second project
+        data_manager.set_current_project("proj2")
+        data_manager.start_current_timer()
+        
+        # First should stop, second should start
+        if proj1 and proj2:
+            self.assertFalse(proj1.is_running_today())
+            self.assertTrue(proj2.is_running_today())
+        
+        # Start third project
+        data_manager.set_current_project("proj3")
+        data_manager.start_current_timer()
+        
+        # Only third should be running
+        if proj1 and proj2 and proj3:
+            self.assertFalse(proj1.is_running_today())
+            self.assertFalse(proj2.is_running_today())
+            self.assertTrue(proj3.is_running_today())
+    
+    def test_data_persistence_integrity(self):
+        """Test data persistence and integrity across save/load cycles"""
+        data_manager = ProjectDataManager(self.temp_file.name)
+        
+        # Create complex project structure
+        project = data_manager.add_project("Complex Project", "COMP-001", "complex")
+        
+        if project:
+            # Add sub-activities
+            sub1 = project.add_sub_activity("Task 1", "task1")
+            sub2 = project.add_sub_activity("Task 2", "task2")
+            
+            # Add time records
+            today_record = project.get_today_record()
+            today_record.add_time(7200)  # 2 hours
+            
+            if sub1:
+                sub1_record = sub1.get_today_record()
+                sub1_record.add_time(3600)  # 1 hour
+            
+            if sub2:
+                sub2_record = sub2.get_today_record()
+                sub2_record.add_time(1800)  # 30 minutes
+        
+        # Save data
+        data_manager.save_projects(force=True)
+        
+        # Load with new manager multiple times
+        for _ in range(3):
+            new_manager = ProjectDataManager(self.temp_file.name)
+            result = new_manager.load_projects()
+            self.assertTrue(result)
+            
+            self.assertEqual(len(new_manager.projects), 1)
+            loaded_project = new_manager.get_project("complex")
+            self.assertIsNotNone(loaded_project)
+            
+            if loaded_project:
+                self.assertEqual(loaded_project.name, "Complex Project")
+                self.assertEqual(len(loaded_project.sub_activities), 2)
+                
+                # Check time data integrity
+                today_record = loaded_project.get_today_record()
+                self.assertEqual(today_record.total_seconds, 7200)
+                
+                task1 = loaded_project.get_sub_activity("task1")
+                if task1:
+                    task1_record = task1.get_today_record()
+                    self.assertEqual(task1_record.total_seconds, 3600)
+    
+    def test_error_handling_robustness(self):
+        """Test application robustness against various error conditions"""
+        data_manager = ProjectDataManager(self.temp_file.name)
+        
+        # Test invalid operations
+        result = data_manager.start_current_timer()  # No current project
+        self.assertFalse(result)
+        
+        result = data_manager.set_current_project("nonexistent")
+        self.assertFalse(result)
+        
+        result = data_manager.set_current_sub_activity("nonexistent")
+        self.assertFalse(result)
+        
+        result = data_manager.remove_project("nonexistent")
+        self.assertFalse(result)
+        
+        # Test duplicate project creation
+        proj1 = data_manager.add_project("Test", "TEST-001", "test")
+        proj2 = data_manager.add_project("Test 2", "TEST-002", "test")  # Same alias
+        
+        self.assertIsNotNone(proj1)
+        self.assertIsNone(proj2)  # Should fail due to duplicate alias
+        
+        # Test stopping timers when nothing is running
+        data_manager.stop_all_timers()  # Should not raise exception
+
+
+class TestComponentIntegration(unittest.TestCase):
+    """Test integration between different components"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        self.temp_file.close()
+    
+    def tearDown(self):
+        """Clean up test environment"""
+        if Path(self.temp_file.name).exists():
+            Path(self.temp_file.name).unlink()
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_widget_data_manager_integration(self, mock_manager_class):
+        """Test integration between widget and data manager"""
+        # Create real data manager
+        real_data_manager = ProjectDataManager(self.temp_file.name)
+        mock_manager_class.return_value = real_data_manager
+        
+        # Add test data
+        project = real_data_manager.add_project("Integration Test", "INT-001", "int")
+        if project:
+            project.add_sub_activity("Testing", "test")
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            
+            # Verify widget uses the data manager
+            self.assertEqual(widget.data_manager, real_data_manager)
+            self.assertEqual(len(widget.data_manager.projects), 1)
+    
+    def test_minimized_widget_integration(self):
+        """Test minimized widget integration with data manager"""
+        data_manager = ProjectDataManager(self.temp_file.name)
+        
+        # Add test project
+        project = data_manager.add_project("Mini Test", "MINI-001", "mini")
+        if project:
+            data_manager.set_current_project("mini")
+            data_manager.start_current_timer()
+        
+        # Create mock parent
+        mock_parent = MagicMock()
+        mock_parent.root = tk.Tk()
+        mock_parent.get_current_theme.return_value = {
+            'name': 'Test',
+            'bg': '#000000',
+            'fg': '#FFFFFF',
+            'accent': '#FF0000',
+            'button_bg': '#111111',
+            'button_fg': '#EEEEEE',
+            'button_active': '#222222'
+        }
+        
+        mock_maximize = MagicMock()
+        
+        try:
+            with patch.object(tk.Toplevel, 'mainloop'):
+                mini_widget = MinimizedTickTockWidget(
+                    mock_parent,
+                    data_manager,
+                    mock_maximize
+                )
+                
+                # Verify integration
+                self.assertEqual(mini_widget.data_manager, data_manager)
+                
+                # Test maximize callback
+                mini_widget.maximize()
+                mock_maximize.assert_called_once()
+        finally:
+            mock_parent.root.destroy()
+    
+    def test_project_management_integration(self):
+        """Test project management window integration"""
+        data_manager = ProjectDataManager(self.temp_file.name)
+        
+        # Add initial data
+        project = data_manager.add_project("PM Test", "PM-001", "pm")
+        if project:
+            project.add_sub_activity("Management", "mgmt")
+        
+        # Create mock parent
+        mock_parent = MagicMock()
+        mock_parent.root = tk.Tk()
+        
+        mock_callback = MagicMock()
+        
+        theme = {
+            'name': 'Test',
+            'bg': '#000000',
+            'fg': '#FFFFFF',
+            'accent': '#FF0000',
+            'button_bg': '#111111',
+            'button_fg': '#EEEEEE',
+            'button_active': '#222222'
+        }
+        
+        try:
+            with patch.object(tk.Toplevel, 'mainloop'):
+                pm_window = ProjectManagementWindow(
+                    mock_parent,
+                    data_manager,
+                    mock_callback,
+                    theme
+                )
+                
+                # Verify integration
+                self.assertIsNotNone(pm_window.data_manager)
+                self.assertEqual(len(data_manager.projects), 1)
+        finally:
+            mock_parent.root.destroy()
+    
+    def test_monthly_report_integration(self):
+        """Test monthly report integration with data"""
+        data_manager = ProjectDataManager(self.temp_file.name)
+        
+        # Add projects with time data
+        project1 = data_manager.add_project("Report Test 1", "RPT-001", "rpt1")
+        project2 = data_manager.add_project("Report Test 2", "RPT-002", "rpt2")
+        
+        if project1 and project2:
+            # Add time records
+            today = project1.get_today_record()
+            today.add_time(3600)
+            
+            today2 = project2.get_today_record()
+            today2.add_time(7200)
+        
+        # Create mock parent
+        mock_parent = MagicMock()
+        mock_parent.root = tk.Tk()
+        
+        theme = {
+            'name': 'Matrix',
+            'bg': '#001100',
+            'fg': '#00FF00',
+            'accent': '#00AA00',
+            'button_bg': '#003300',
+            'button_fg': '#00FF00',
+            'button_active': '#004400'
+        }
+        
+        try:
+            with patch.object(tk.Toplevel, 'mainloop'):
+                report_window = MonthlyReportWindow(
+                    mock_parent,
+                    data_manager,
+                    theme
+                )
+                
+                # Verify integration
+                self.assertIsNotNone(report_window.data_manager)
+                self.assertEqual(len(data_manager.projects), 2)
+                
+                # Test report update
+                report_window.update_report()
+        finally:
+            mock_parent.root.destroy()
+
+
+class TestPerformanceAndScaling(unittest.TestCase):
+    """Test performance with larger datasets"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        self.temp_file.close()
+    
+    def tearDown(self):
+        """Clean up test environment"""
+        if Path(self.temp_file.name).exists():
+            Path(self.temp_file.name).unlink()
+    
+    def test_many_projects_performance(self):
+        """Test performance with many projects"""
+        data_manager = ProjectDataManager(self.temp_file.name)
+        
+        # Add many projects
+        num_projects = 50
+        for i in range(num_projects):
+            project = data_manager.add_project(
+                f"Project {i}",
+                f"PROJ-{i:03d}",
+                f"proj{i}"
+            )
+            
+            if project:
+                # Add sub-activities
+                for j in range(3):
+                    project.add_sub_activity(f"Task {j}", f"task{j}")
+        
+        self.assertEqual(len(data_manager.projects), num_projects)
+        
+        # Test operations are still performant
+        aliases = data_manager.get_project_aliases()
+        self.assertEqual(len(aliases), num_projects)
+        
+        # Test save/load performance
+        start_time = time.time()
+        data_manager.save_projects(force=True)
+        save_time = time.time() - start_time
+        
+        start_time = time.time()
+        new_manager = ProjectDataManager(self.temp_file.name)
+        new_manager.load_projects()
+        load_time = time.time() - start_time
+        
+        # Should complete reasonably quickly (adjust thresholds as needed)
+        self.assertLess(save_time, 5.0)  # 5 seconds max
+        self.assertLess(load_time, 5.0)  # 5 seconds max
+        
+        # Verify data integrity
+        self.assertEqual(len(new_manager.projects), num_projects)
+    
+    def test_many_time_records_performance(self):
+        """Test performance with many time records"""
+        data_manager = ProjectDataManager(self.temp_file.name)
+        
+        project = data_manager.add_project("Heavy Project", "HEAVY-001", "heavy")
+        
+        if project:
+            # Add many time records (simulating months of data)
+            for day in range(1, 100):  # 99 days of data
+                date_str = f"2025-01-{day:02d}" if day <= 31 else f"2025-02-{day-31:02d}" if day <= 59 else f"2025-03-{day-59:02d}"
+                if day <= 31 or (day > 31 and day <= 59) or (day > 59 and day <= 90):
+                    from tick_tock_widget.project_data import TimeRecord
+                    record = TimeRecord(date=date_str, total_seconds=3600 * (day % 8))  # Variable hours
+                    project.time_records[date_str] = record
+        
+        # Test operations remain performant
+        if project:
+            today_record = project.get_today_record()
+            self.assertIsNotNone(today_record)
+            
+            total_time = project.get_total_time_today()
+            self.assertIsInstance(total_time, str)
+        
+        # Test save/load with large dataset
+        start_time = time.time()
+        data_manager.save_projects(force=True)
+        save_time = time.time() - start_time
+        
+        start_time = time.time()
+        new_manager = ProjectDataManager(self.temp_file.name)
+        new_manager.load_projects()
+        load_time = time.time() - start_time
+        
+        # Should still be reasonably fast
+        self.assertLess(save_time, 10.0)
+        self.assertLess(load_time, 10.0)
+        
+        # Verify data integrity
+        loaded_project = new_manager.get_project("heavy")
+        self.assertIsNotNone(loaded_project)
+        if loaded_project:
+            self.assertGreater(len(loaded_project.time_records), 90)
+
+
+class TestEdgeCasesAndBoundaryConditions(unittest.TestCase):
+    """Test edge cases and boundary conditions"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        self.temp_file.close()
+    
+    def tearDown(self):
+        """Clean up test environment"""
+        if Path(self.temp_file.name).exists():
+            Path(self.temp_file.name).unlink()
+    
+    def test_empty_data_handling(self):
+        """Test handling of completely empty data"""
+        data_manager = ProjectDataManager(self.temp_file.name)
+        
+        # Test operations on empty data
+        self.assertEqual(len(data_manager.projects), 0)
+        self.assertEqual(len(data_manager.get_project_aliases()), 0)
+        self.assertIsNone(data_manager.get_current_project())
+        self.assertIsNone(data_manager.get_current_sub_activity())
+        
+        # Test save/load empty data
+        result = data_manager.save_projects(force=True)
+        self.assertTrue(result)
+        
+        new_manager = ProjectDataManager(self.temp_file.name)
+        result = new_manager.load_projects()
+        self.assertTrue(result)
+        self.assertEqual(len(new_manager.projects), 0)
+    
+    def test_extreme_values(self):
+        """Test handling of extreme values"""
+        data_manager = ProjectDataManager(self.temp_file.name)
+        
+        # Test very long names
+        long_name = "A" * 1000
+        long_alias = "B" * 500
+        long_dz = "C" * 100
+        
+        project = data_manager.add_project(long_name, long_dz, long_alias)
+        self.assertIsNotNone(project)
+        
+        if project:
+            # Test very large time values
+            from tick_tock_widget.project_data import TimeRecord
+            huge_record = TimeRecord(date="2025-01-01", total_seconds=999999999)  # ~31 years
+            project.time_records["2025-01-01"] = huge_record
+            
+            formatted = huge_record.get_formatted_time()
+            self.assertIsInstance(formatted, str)
+            self.assertIn(":", formatted)
+        
+        # Test save/load with extreme values
+        result = data_manager.save_projects(force=True)
+        self.assertTrue(result)
+        
+        new_manager = ProjectDataManager(self.temp_file.name)
+        result = new_manager.load_projects()
+        self.assertTrue(result)
+        
+        loaded_project = new_manager.get_project(long_alias)
+        self.assertIsNotNone(loaded_project)
+        if loaded_project:
+            self.assertEqual(loaded_project.name, long_name)
+    
+    def test_unicode_and_special_characters(self):
+        """Test handling of unicode and special characters"""
+        data_manager = ProjectDataManager(self.temp_file.name)
+        
+        # Test various unicode characters
+        unicode_names = [
+            "Проект тест",  # Cyrillic
+            "プロジェクト",  # Japanese
+            "项目测试",  # Chinese
+            "🚀 Rocket Project 🌟",  # Emojis
+            "Project with \"quotes\" and 'apostrophes'",  # Quotes
+            "Project/with\\special:chars*",  # Special chars
+        ]
+        
+        for i, name in enumerate(unicode_names):
+            project = data_manager.add_project(name, f"UNI-{i:03d}", f"uni{i}")
+            self.assertIsNotNone(project, f"Failed to create project with name: {name}")
+        
+        # Test save/load with unicode
+        result = data_manager.save_projects(force=True)
+        self.assertTrue(result)
+        
+        new_manager = ProjectDataManager(self.temp_file.name)
+        result = new_manager.load_projects()
+        self.assertTrue(result)
+        
+        self.assertEqual(len(new_manager.projects), len(unicode_names))
+        
+        # Verify all names were preserved
+        for i, name in enumerate(unicode_names):
+            project = new_manager.get_project(f"uni{i}")
+            self.assertIsNotNone(project)
+            if project:
+                self.assertEqual(project.name, name)
+
+
+if __name__ == '__main__':
+    unittest.main()

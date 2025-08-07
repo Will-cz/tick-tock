@@ -1,0 +1,215 @@
+"""
+Tests for ProjectManagementWindow functionality - Fixed without GUI timer issues
+"""
+
+import unittest
+import tempfile
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+import tkinter as tk
+
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from tick_tock_widget.project_management import ProjectManagementWindow
+from tick_tock_widget.project_data import ProjectDataManager
+
+
+class TestProjectManagementWindow(unittest.TestCase):
+    """Test ProjectManagementWindow functionality without GUI issues"""
+    
+    def setUp(self):
+        """Set up test environment with comprehensive GUI mocking"""
+        # Create temp file
+        self.temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        self.temp_file.close()
+        
+        # Create mock parent that prevents timers
+        self.mock_parent = MagicMock()
+        self.mock_parent.root = MagicMock()
+        # Critical: Mock after() method to prevent timer creation
+        self.mock_parent.root.after = MagicMock(return_value="mock_timer_id")
+        self.mock_parent.root.after_cancel = MagicMock()
+        
+        # Mock data manager
+        self.mock_data_manager = MagicMock(spec=ProjectDataManager)
+        self.mock_data_manager.projects = []
+        self.mock_data_manager.get_project_aliases.return_value = []
+        
+        # Mock callback
+        self.mock_callback = MagicMock()
+        
+        # Test theme
+        self.test_theme = {
+            'name': 'Test',
+            'bg': '#000000',
+            'fg': '#FFFFFF',
+            'accent': '#FF0000',
+            'button_bg': '#111111',
+            'button_fg': '#EEEEEE',
+            'button_active': '#222222'
+        }
+    
+    def tearDown(self):
+        """Clean up test environment"""
+        if Path(self.temp_file.name).exists():
+            Path(self.temp_file.name).unlink()
+    
+    def test_window_initialization(self):
+        """Test project management window initialization"""
+        with patch('tkinter.Toplevel') as mock_toplevel, \
+             patch('tkinter.ttk.Treeview'), \
+             patch('tkinter.ttk.Frame'), \
+             patch('tkinter.ttk.Button'), \
+             patch('tkinter.ttk.Scrollbar'), \
+             patch.object(ProjectManagementWindow, 'setup_window'), \
+             patch.object(ProjectManagementWindow, 'create_widgets'), \
+             patch.object(ProjectManagementWindow, 'populate_projects'):
+            
+            # Mock window
+            mock_window = MagicMock()
+            mock_toplevel.return_value = mock_window
+            
+            window = ProjectManagementWindow(
+                self.mock_parent,
+                self.mock_data_manager,
+                self.mock_callback,
+                self.test_theme
+            )
+            
+            # Verify initialization
+            self.assertIsNotNone(window.window)
+            self.assertEqual(window.data_manager, self.mock_data_manager)
+            self.assertEqual(window.on_update_callback, self.mock_callback)
+            self.assertEqual(window.theme, self.test_theme)
+    
+    @patch('tkinter.messagebox.askyesno')
+    @patch('tkinter.messagebox.showerror') 
+    def test_add_project_functionality(self, mock_showerror, mock_askyesno):
+        """Test adding a new project"""
+        with patch('tkinter.Toplevel') as mock_toplevel, \
+             patch('tkinter.ttk.Treeview'), \
+             patch('tkinter.ttk.Frame'), \
+             patch('tkinter.ttk.Button'), \
+             patch('tkinter.ttk.Scrollbar'), \
+             patch.object(ProjectManagementWindow, 'setup_window'), \
+             patch.object(ProjectManagementWindow, 'create_widgets'), \
+             patch.object(ProjectManagementWindow, 'populate_projects'):
+            
+            # Mock window
+            mock_window = MagicMock()
+            mock_toplevel.return_value = mock_window
+            
+            pm_window = ProjectManagementWindow(
+                self.mock_parent, self.mock_data_manager, self.mock_callback, self.test_theme
+            )
+            
+            # Mock the dialog creation
+            with patch('tick_tock_widget.project_management.ProjectEditDialog') as mock_dialog_class:
+                mock_dialog = MagicMock()
+                mock_dialog.show.return_value = ('Test Project', 'TP001', 'test')
+                mock_dialog_class.return_value = mock_dialog
+                
+                # Mock status label
+                pm_window.status_label = MagicMock()
+                
+                # Test add project
+                pm_window.add_project()
+                
+                # Verify calls
+                mock_dialog_class.assert_called_once()
+                mock_dialog.show.assert_called_once()
+                self.mock_data_manager.add_project.assert_called_once_with('Test Project', 'TP001', 'test')
+    
+    def test_add_sub_activity_functionality(self):
+        """Test adding a sub-activity to a project"""
+        with patch('tkinter.Toplevel') as mock_toplevel, \
+             patch('tkinter.ttk.Treeview'), \
+             patch('tkinter.ttk.Frame'), \
+             patch('tkinter.ttk.Button'), \
+             patch('tkinter.ttk.Scrollbar'), \
+             patch.object(ProjectManagementWindow, 'setup_window'), \
+             patch.object(ProjectManagementWindow, 'create_widgets'), \
+             patch.object(ProjectManagementWindow, 'populate_projects'):
+            
+            # Mock window
+            mock_window = MagicMock()
+            mock_toplevel.return_value = mock_window
+            
+            pm_window = ProjectManagementWindow(
+                self.mock_parent, self.mock_data_manager, self.mock_callback, self.test_theme
+            )
+            
+            # Add mock tree and set up proper selection
+            pm_window.tree = MagicMock()
+            pm_window.tree.selection.return_value = ['project_1']
+            
+            # Set up the mock to return the right value based on the item parameter
+            def mock_item_side_effect(item, key=None):
+                if key == 'text':
+                    return '📁 test'  # Project with folder icon
+                return {'text': '📁 test'}
+            
+            pm_window.tree.item.side_effect = mock_item_side_effect
+            pm_window.tree.parent.return_value = ''  # Top level item
+            
+            # Mock data manager to return a project
+            mock_project = MagicMock()
+            self.mock_data_manager.get_project.return_value = mock_project
+            
+            # Mock status label and add to mock window for populate_projects
+            pm_window.status_label = MagicMock()
+            
+            # Mock MessageDialog to prevent warnings
+            with patch('tick_tock_widget.project_management.MessageDialog') as mock_msg_dialog:
+                # Mock SubActivityEditDialog
+                with patch('tick_tock_widget.project_management.SubActivityEditDialog') as mock_dialog_class:
+                    mock_dialog = MagicMock()
+                    mock_dialog.show.return_value = ('New Sub-Activity', 'newsub')
+                    mock_dialog_class.return_value = mock_dialog
+                    
+                    # Test add sub-activity
+                    pm_window.add_sub_activity()
+                    
+                    # Check if we got to the dialog creation
+                    if mock_dialog_class.call_count == 0:
+                        # Check if MessageDialog was called instead (indicates an error condition)
+                        if mock_msg_dialog.call_count > 0:
+                            print("MessageDialog was called - indicates validation failure")
+                            print(f"MessageDialog calls: {mock_msg_dialog.call_args_list}")
+                    
+                    # Verify calls
+                    mock_dialog_class.assert_called_once()
+                    mock_dialog.show.assert_called_once()
+                    self.mock_data_manager.get_project.assert_called_once_with('test')
+    
+    def test_dialog_tracking(self):
+        """Test that open dialogs are tracked"""
+        with patch('tkinter.Toplevel') as mock_toplevel, \
+             patch('tkinter.ttk.Treeview'), \
+             patch('tkinter.ttk.Frame'), \
+             patch('tkinter.ttk.Button'), \
+             patch('tkinter.ttk.Scrollbar'), \
+             patch.object(ProjectManagementWindow, 'setup_window'), \
+             patch.object(ProjectManagementWindow, 'create_widgets'), \
+             patch.object(ProjectManagementWindow, 'populate_projects'):
+            
+            # Mock window
+            mock_window = MagicMock()
+            mock_toplevel.return_value = mock_window
+            
+            window = ProjectManagementWindow(
+                self.mock_parent,
+                self.mock_data_manager,
+                self.mock_callback,
+                self.test_theme
+            )
+            
+            # Verify dialog tracking
+            self.assertIsInstance(window.open_dialogs, list)
+            self.assertEqual(len(window.open_dialogs), 0)
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -1,0 +1,285 @@
+"""
+Tests for MinimizedTickTockWidget functionality
+"""
+
+import unittest
+import tempfile
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+import tkinter as tk
+
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from tick_tock_widget.minimized_widget import MinimizedTickTockWidget
+from tick_tock_widget.project_data import ProjectDataManager
+from tests.gui_test_utils import SafeGUITestCase, no_gui_blocking
+
+
+class TestMinimizedWidget(SafeGUITestCase):
+    """Test MinimizedTickTockWidget functionality"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        super().setUp()
+        
+        self.temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        self.temp_file.close()
+        
+        # Create mock parent widget using the utility
+        self.mock_parent = self.create_mock_parent()
+        
+        # Create mock data manager
+        self.mock_data_manager = MagicMock(spec=ProjectDataManager)
+        self.mock_data_manager.get_current_project.return_value = None
+        self.mock_data_manager.get_current_sub_activity.return_value = None
+        
+        # Create mock maximize callback
+        self.mock_maximize = MagicMock()
+    
+    def tearDown(self):
+        """Clean up test environment"""
+        # Clean up temp file
+        if Path(self.temp_file.name).exists():
+            Path(self.temp_file.name).unlink()
+        
+        # Parent class will handle GUI cleanup
+        super().tearDown()
+    
+    def test_minimized_widget_initialization(self):
+        """Test minimized widget initialization"""
+        with no_gui_blocking():
+            widget = MinimizedTickTockWidget(
+                self.mock_parent,
+                self.mock_data_manager, 
+                self.mock_maximize
+            )
+            self.track_widget(widget)
+            
+            # Verify basic initialization
+            self.assertIsNotNone(widget.root)
+            self.assertEqual(widget.data_manager, self.mock_data_manager)
+            self.assertEqual(widget.on_maximize, self.mock_maximize)
+            self.assertEqual(widget.parent_widget, self.mock_parent)
+    
+    def test_window_setup(self):
+        """Test window setup properties"""
+        with patch.object(tk.Toplevel, 'mainloop'):
+            widget = MinimizedTickTockWidget(
+                self.mock_parent,
+                self.mock_data_manager,
+                self.mock_maximize
+            )
+            
+            # Verify window properties
+            self.assertEqual(widget.root.title(), "Tick-Tock Timer (Mini)")
+            self.assertTrue(widget.root.overrideredirect())
+            
+            # Verify always on top
+            try:
+                self.assertTrue(widget.root.attributes('-topmost'))
+            except tk.TclError:
+                # May not be supported on all platforms
+                pass
+    
+    def test_maximize_callback(self):
+        """Test maximize functionality"""
+        with patch.object(tk.Toplevel, 'mainloop'):
+            widget = MinimizedTickTockWidget(
+                self.mock_parent,
+                self.mock_data_manager,
+                self.mock_maximize
+            )
+            
+            # Test maximize
+            widget.maximize()
+            
+            # Verify callback was called
+            self.mock_maximize.assert_called_once()
+    
+    def test_update_time_display(self):
+        """Test time display update"""
+        with patch.object(tk.Toplevel, 'mainloop'):
+            widget = MinimizedTickTockWidget(
+                self.mock_parent,
+                self.mock_data_manager,
+                self.mock_maximize
+            )
+            
+            # Mock time label
+            widget.time_label = MagicMock()
+            
+            # Test update
+            widget.update_time()
+            
+            # Verify label was updated
+            widget.time_label.config.assert_called()
+    
+    def test_update_project_display_no_project(self):
+        """Test project display update with no current project"""
+        self.mock_data_manager.get_current_project.return_value = None
+        
+        with patch.object(tk.Toplevel, 'mainloop'):
+            widget = MinimizedTickTockWidget(
+                self.mock_parent,
+                self.mock_data_manager,
+                self.mock_maximize
+            )
+            
+            # Mock labels
+            widget.project_label = MagicMock()
+            widget.timer_label = MagicMock()
+            
+            # Test update
+            widget.update_project_display()
+            
+            # Should handle no project gracefully
+            widget.project_label.config.assert_called()
+            widget.timer_label.config.assert_called()
+    
+    def test_update_project_display_with_project(self):
+        """Test project display update with current project"""
+        # Mock current project
+        mock_project = MagicMock()
+        mock_project.alias = "test_project"
+        mock_project.get_total_time_today.return_value = "01:30:00"
+        mock_project.is_running_today.return_value = True
+        
+        self.mock_data_manager.get_current_project.return_value = mock_project
+        self.mock_data_manager.get_current_sub_activity.return_value = None
+        
+        with patch.object(tk.Toplevel, 'mainloop'):
+            widget = MinimizedTickTockWidget(
+                self.mock_parent,
+                self.mock_data_manager,
+                self.mock_maximize
+            )
+            
+            # Mock labels
+            widget.project_label = MagicMock()
+            widget.timer_label = MagicMock()
+            
+            # Test update
+            widget.update_project_display()
+            
+            # Verify project info was displayed
+            widget.project_label.config.assert_called()
+            widget.timer_label.config.assert_called()
+    
+    def test_dragging_functionality(self):
+        """Test window dragging setup"""
+        with patch.object(tk.Toplevel, 'mainloop'):
+            widget = MinimizedTickTockWidget(
+                self.mock_parent,
+                self.mock_data_manager,
+                self.mock_maximize
+            )
+            
+            # Verify dragging variables are initialized
+            self.assertEqual(widget.start_x, 0)
+            self.assertEqual(widget.start_y, 0)
+    
+    def test_error_handling_during_init(self):
+        """Test error handling during initialization"""
+        # Mock parent widget that raises exception
+        bad_parent = MagicMock()
+        bad_parent.root = None  # This should cause issues
+        bad_parent.get_current_theme.side_effect = Exception("Test error")
+        
+        # Should not raise exception even with bad parent
+        try:
+            with patch.object(tk.Toplevel, 'mainloop'):
+                widget = MinimizedTickTockWidget(
+                    bad_parent,
+                    self.mock_data_manager,
+                    self.mock_maximize
+                )
+        except Exception:
+            self.fail("MinimizedTickTockWidget should handle initialization errors gracefully")
+
+
+class TestMinimizedWidgetIntegration(unittest.TestCase):
+    """Integration tests for MinimizedTickTockWidget"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        self.temp_file.close()
+        
+        # Create real data manager for integration tests
+        self.data_manager = ProjectDataManager(self.temp_file.name)
+        
+        # Create mock parent widget
+        self.mock_parent = MagicMock()
+        self.mock_parent.root = tk.Tk()
+        self.mock_parent.get_current_theme.return_value = {
+            'name': 'Matrix',
+            'bg': '#001100',
+            'fg': '#00FF00',
+            'accent': '#00AA00',
+            'button_bg': '#003300',
+            'button_fg': '#00FF00',
+            'button_active': '#004400'
+        }
+        
+        self.mock_maximize = MagicMock()
+    
+    def tearDown(self):
+        """Clean up test environment"""
+        if hasattr(self, 'mock_parent') and self.mock_parent.root:
+            try:
+                self.mock_parent.root.destroy()
+            except tk.TclError:
+                pass
+        
+        if Path(self.temp_file.name).exists():
+            Path(self.temp_file.name).unlink()
+    
+    def test_integration_with_real_data(self):
+        """Test integration with real project data"""
+        # Add test project
+        project = self.data_manager.add_project("Test Project", "TEST-001", "test")
+        sub_activity = project.add_sub_activity("Development", "dev")
+        
+        # Set current selections
+        self.data_manager.set_current_project("test")
+        self.data_manager.set_current_sub_activity("dev")
+        
+        with patch.object(tk.Toplevel, 'mainloop'):
+            widget = MinimizedTickTockWidget(
+                self.mock_parent,
+                self.data_manager,
+                self.mock_maximize
+            )
+            
+            # Verify widget can handle real data
+            self.assertIsNotNone(widget)
+            self.assertEqual(widget.data_manager, self.data_manager)
+    
+    def test_timing_integration(self):
+        """Test timing functionality integration"""
+        # Add test project
+        project = self.data_manager.add_project("Test Project", "TEST-001", "test")
+        self.data_manager.set_current_project("test")
+        
+        with patch.object(tk.Toplevel, 'mainloop'):
+            widget = MinimizedTickTockWidget(
+                self.mock_parent,
+                self.data_manager,
+                self.mock_maximize
+            )
+            
+            # Start timing
+            self.data_manager.start_current_timer()
+            
+            # Verify project is running
+            self.assertTrue(project.is_running_today())
+            
+            # Widget should be able to display running state
+            # (actual display testing would require more complex mocking)
+            self.assertIsNotNone(widget)
+
+
+if __name__ == '__main__':
+    unittest.main()

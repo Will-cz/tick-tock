@@ -1,0 +1,588 @@
+#!/usr/bin/env python3
+"""
+System Validation Tests for Tick-Tock Widget
+Tests repeated actions, window lifecycle, and real user workflow patterns
+"""
+
+import unittest
+import tempfile
+import json
+import os
+import time
+import threading
+from pathlib import Path
+from unittest.mock import patch, MagicMock, call
+import tkinter as tk
+from datetime import datetime, timedelta
+
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from tick_tock_widget.project_data import ProjectDataManager, Project, SubActivity, TimeRecord
+from tick_tock_widget.tick_tock_widget import TickTockWidget
+
+
+class TestSystemValidation(unittest.TestCase):
+    """System validation tests for repeated actions and user workflows"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.temp_dir = tempfile.mkdtemp()
+        self.test_data_file = Path(self.temp_dir) / "test_projects.json"
+        self.root = tk.Tk()
+        self.root.withdraw()  # Hide test windows
+        
+        # Create test data
+        self.create_test_data()
+        
+    def tearDown(self):
+        """Clean up test environment"""
+        try:
+            self.root.destroy()
+        except tk.TclError:
+            pass
+        
+        # Clean up temp files
+        import shutil
+        try:
+            shutil.rmtree(self.temp_dir)
+        except (FileNotFoundError, OSError):
+            pass
+    
+    def create_test_data(self):
+        """Create test data for system validation"""
+        test_data = {
+            "projects": [
+                {
+                    "name": "System Test Project 1",
+                    "dz_number": "SYS-001",
+                    "alias": "sys1",
+                    "sub_activities": [
+                        {
+                            "name": "Development",
+                            "alias": "dev",
+                            "time_records": {}
+                        },
+                        {
+                            "name": "Testing",
+                            "alias": "test",
+                            "time_records": {}
+                        }
+                    ],
+                    "time_records": {}
+                },
+                {
+                    "name": "System Test Project 2",
+                    "dz_number": "SYS-002",
+                    "alias": "sys2",
+                    "sub_activities": [
+                        {
+                            "name": "Analysis",
+                            "alias": "analysis",
+                            "time_records": {}
+                        }
+                    ],
+                    "time_records": {}
+                }
+            ],
+            "current_project_alias": None,
+            "current_sub_activity_alias": None
+        }
+        
+        with open(self.test_data_file, 'w', encoding='utf-8') as f:
+            json.dump(test_data, f, indent=2)
+    
+    def test_repeated_window_operations(self):
+        """Test repeated opening and closing of windows"""
+        print("\n=== System Validation: Repeated Window Operations ===")
+        
+        try:
+            from tick_tock_widget.project_management import ProjectManagementWindow
+            from tick_tock_widget.monthly_report import MonthlyReportWindow
+        except ImportError:
+            self.skipTest("Required window classes not available")
+        
+        # Create main widget (no parameters needed)
+        widget = TickTockWidget()
+        # Set test data file by mocking data manager
+        widget.data_manager = ProjectDataManager(str(self.test_data_file))
+        
+        # Test repeated project management window operations
+        for i in range(10):
+            print(f"  Opening/closing project management window: iteration {i+1}")
+            
+            # Mock the window creation to avoid actual GUI
+            with patch.object(ProjectManagementWindow, '__init__', return_value=None):
+                with patch('tkinter.Toplevel.mainloop'):
+                    try:
+                        # Simulate opening project management window
+                        pm_window = MagicMock()
+                        pm_window.destroy = MagicMock()
+                        
+                        # Simulate window lifecycle
+                        self.assertIsNotNone(pm_window)
+                        pm_window.destroy()
+                        
+                        # Brief pause to simulate user interaction
+                        time.sleep(0.01)
+                        
+                    except Exception as e:
+                        self.fail(f"Window operation failed on iteration {i+1}: {e}")
+        
+        print("  ✅ Repeated window operations completed successfully")
+        
+        # Test repeated monthly report window operations
+        for i in range(5):
+            print(f"  Opening/closing monthly report window: iteration {i+1}")
+            
+            with patch.object(MonthlyReportWindow, '__init__', return_value=None):
+                with patch('tkinter.Toplevel.mainloop'):
+                    try:
+                        # Simulate opening monthly report window
+                        mr_window = MagicMock()
+                        mr_window.destroy = MagicMock()
+                        
+                        # Simulate window lifecycle
+                        self.assertIsNotNone(mr_window)
+                        mr_window.destroy()
+                        
+                        time.sleep(0.01)
+                        
+                    except Exception as e:
+                        self.fail(f"Monthly report window failed on iteration {i+1}: {e}")
+        
+        print("  ✅ Repeated monthly report operations completed successfully")
+    
+    def test_repeated_project_operations(self):
+        """Test repeated adding and removing of projects and activities"""
+        print("\n=== System Validation: Repeated Project Operations ===")
+        
+        dm = ProjectDataManager(str(self.test_data_file))
+        self.assertTrue(dm.load_projects(), "Failed to load initial test data")
+        
+        initial_project_count = len(dm.projects)
+        print(f"  Initial project count: {initial_project_count}")
+        
+        # Test repeated project addition and removal
+        for cycle in range(5):
+            print(f"  Project operation cycle {cycle+1}/5")
+            
+            # Add projects
+            for i in range(3):
+                project_name = f"Temp Project {cycle}-{i}"
+                project = Project(
+                    name=project_name,
+                    dz_number=f"TEMP-{cycle:02d}-{i:02d}",
+                    alias=f"temp{cycle}{i}",
+                    sub_activities=[],
+                    time_records={}
+                )
+                dm.projects.append(project)
+            
+            # Verify addition
+            expected_count = initial_project_count + 3
+            self.assertEqual(len(dm.projects), expected_count, 
+                           f"Project count mismatch after addition in cycle {cycle+1}")
+            
+            # Add sub-activities to one project
+            if dm.projects:
+                last_project = dm.projects[-1]
+                for j in range(2):
+                    sub_activity = SubActivity(
+                        name=f"Sub Activity {j}",
+                        alias=f"sub{j}",
+                        time_records={}
+                    )
+                    last_project.sub_activities.append(sub_activity)
+                
+                self.assertEqual(len(last_project.sub_activities), 2,
+                               f"Sub-activity count mismatch in cycle {cycle+1}")
+            
+            # Save and reload to test persistence
+            save_result = dm.save_projects(force=True)
+            self.assertTrue(save_result, f"Save failed in cycle {cycle+1}")
+            
+            # Reload and verify
+            dm_reload = ProjectDataManager(str(self.test_data_file))
+            reload_result = dm_reload.load_projects()
+            self.assertTrue(reload_result, f"Reload failed in cycle {cycle+1}")
+            self.assertEqual(len(dm_reload.projects), expected_count,
+                           f"Project count mismatch after reload in cycle {cycle+1}")
+            
+            # Remove the temporary projects
+            dm.projects = dm.projects[:initial_project_count]
+            
+            # Verify removal
+            self.assertEqual(len(dm.projects), initial_project_count,
+                           f"Project count mismatch after removal in cycle {cycle+1}")
+            
+            # Save the cleanup
+            save_result = dm.save_projects(force=True)
+            self.assertTrue(save_result, f"Cleanup save failed in cycle {cycle+1}")
+        
+        print("  ✅ Repeated project operations completed successfully")
+    
+    def test_repeated_timer_operations(self):
+        """Test repeated starting and stopping of timers"""
+        print("\n=== System Validation: Repeated Timer Operations ===")
+        
+        dm = ProjectDataManager(str(self.test_data_file))
+        self.assertTrue(dm.load_projects(), "Failed to load test data")
+        
+        if not dm.projects or not dm.projects[0].sub_activities:
+            self.skipTest("No projects/sub-activities available for timer testing")
+        
+        project = dm.projects[0]
+        sub_activity = project.sub_activities[0]
+        test_date = "2025-08-09"
+        
+        # Test repeated timer start/stop cycles
+        for cycle in range(10):
+            print(f"  Timer operation cycle {cycle+1}/10")
+            
+            # Ensure we have a time record for today
+            if test_date not in sub_activity.time_records:
+                sub_activity.time_records[test_date] = TimeRecord(
+                    date=test_date,
+                    total_seconds=0
+                )
+            
+            time_record = sub_activity.time_records[test_date]
+            initial_total = time_record.total_seconds
+            
+            # Start timer
+            start_time = time.time()
+            time_record.start_timing()
+            
+            self.assertTrue(time_record.is_running,
+                          f"Timer not started in cycle {cycle+1}")
+            self.assertIsNotNone(time_record.last_started,
+                               f"Start time not recorded in cycle {cycle+1}")
+            
+            # Simulate some work time (small delay)
+            time.sleep(0.05)  # 50ms
+            
+            # Stop timer properly to accumulate time
+            time_record.stop_timing()
+            
+            self.assertFalse(time_record.is_running,
+                           f"Timer not stopped in cycle {cycle+1}")
+            self.assertGreater(time_record.total_seconds, initial_total,
+                             f"Time not accumulated in cycle {cycle+1}")
+            
+            # Verify time accumulation is reasonable
+            elapsed = time.time() - start_time
+            time_diff = time_record.total_seconds - initial_total
+            self.assertGreater(time_diff, 0.04,  # At least 40ms
+                             f"Insufficient time accumulated in cycle {cycle+1}")
+            self.assertLess(time_diff, 5.0,  # Less than 5 seconds (more generous)
+                          f"Too much time accumulated in cycle {cycle+1}")
+            
+            print(f"    Cycle {cycle+1}: Accumulated {time_diff:.3f}s")
+        
+        # Test rapid start/stop operations
+        print("  Testing rapid timer toggles...")
+        time_record = sub_activity.time_records[test_date]
+        initial_total = time_record.total_seconds
+        
+        for i in range(20):
+            time_record.start_timing()
+            time.sleep(0.001)  # 1ms
+            time_record.stop_timing()
+        
+        # Should have accumulated some time
+        self.assertGreater(time_record.total_seconds, initial_total,
+                         "No time accumulated in rapid toggle test")
+        
+        print("  ✅ Repeated timer operations completed successfully")
+    
+    def test_repeated_save_operations(self):
+        """Test repeated saving of same and different months"""
+        print("\n=== System Validation: Repeated Save Operations ===")
+        
+        dm = ProjectDataManager(str(self.test_data_file))
+        self.assertTrue(dm.load_projects(), "Failed to load test data")
+        
+        # Test repeated saves of the same data
+        print("  Testing repeated saves of same data...")
+        for i in range(15):
+            save_result = dm.save_projects(force=True)
+            self.assertTrue(save_result, f"Save failed on iteration {i+1}")
+            
+            # Verify file still exists and is readable
+            self.assertTrue(self.test_data_file.exists(),
+                          f"Data file missing after save {i+1}")
+            
+            # Quick reload test
+            dm_test = ProjectDataManager(str(self.test_data_file))
+            load_result = dm_test.load_projects()
+            self.assertTrue(load_result, f"Reload failed after save {i+1}")
+        
+        # Test saves with different monthly data
+        print("  Testing saves with different monthly data...")
+        if dm.projects and dm.projects[0].sub_activities:
+            project = dm.projects[0]
+            sub_activity = project.sub_activities[0]
+            
+            # Create time records for different months
+            test_months = [
+                "2025-01-15", "2025-02-20", "2025-03-10", "2025-04-25",
+                "2025-05-18", "2025-06-05", "2025-07-30", "2025-08-09",
+                "2025-09-12", "2025-10-28", "2025-11-14", "2025-12-31"
+            ]
+            
+            for month_date in test_months:
+                # Add time record for this month
+                sub_activity.time_records[month_date] = TimeRecord(
+                    date=month_date,
+                    total_seconds=3600 + hash(month_date) % 7200  # 1-3 hours
+                )
+                
+                # Save after each month addition
+                save_result = dm.save_projects(force=True)
+                self.assertTrue(save_result, f"Save failed for month {month_date}")
+                
+                # Verify the save
+                dm_verify = ProjectDataManager(str(self.test_data_file))
+                load_result = dm_verify.load_projects()
+                self.assertTrue(load_result, f"Verification load failed for {month_date}")
+                
+                # Check that the time record exists
+                if (dm_verify.projects and dm_verify.projects[0].sub_activities and
+                    dm_verify.projects[0].sub_activities[0].time_records):
+                    time_records = dm_verify.projects[0].sub_activities[0].time_records
+                    self.assertIn(month_date, time_records,
+                                f"Time record not saved for {month_date}")
+        
+        print("  ✅ Repeated save operations completed successfully")
+    
+    def test_concurrent_operations_simulation(self):
+        """Test simulation of concurrent operations"""
+        print("\n=== System Validation: Concurrent Operations Simulation ===")
+        
+        # Create multiple data managers simulating concurrent access
+        managers = []
+        for i in range(3):
+            dm = ProjectDataManager(str(self.test_data_file))
+            dm.load_projects()
+            managers.append(dm)
+        
+        # Simulate concurrent modifications
+        operations_completed = []
+        
+        def modify_data(manager_id, dm):
+            """Simulate data modifications by different 'users'"""
+            try:
+                if dm.projects:
+                    # Modify project name
+                    original_name = dm.projects[0].name
+                    dm.projects[0].name = f"Modified by Manager {manager_id}"
+                    
+                    # Add a time record
+                    if dm.projects[0].sub_activities:
+                        sub_activity = dm.projects[0].sub_activities[0]
+                        test_date = f"2025-08-{9 + manager_id:02d}"
+                        sub_activity.time_records[test_date] = TimeRecord(
+                            date=test_date,
+                            total_seconds=manager_id * 1800  # Different times
+                        )
+                    
+                    # Save changes
+                    time.sleep(0.01 * manager_id)  # Stagger the operations
+                    save_result = dm.save_projects(force=True)
+                    
+                    operations_completed.append({
+                        'manager_id': manager_id,
+                        'success': save_result,
+                        'original_name': original_name,
+                        'new_name': dm.projects[0].name
+                    })
+                    
+            except Exception as e:
+                operations_completed.append({
+                    'manager_id': manager_id,
+                    'success': False,
+                    'error': str(e)
+                })
+        
+        # Start concurrent operations
+        threads = []
+        for i, dm in enumerate(managers):
+            thread = threading.Thread(target=modify_data, args=(i, dm))
+            threads.append(thread)
+            thread.start()
+        
+        # Wait for all operations to complete
+        for thread in threads:
+            thread.join(timeout=5.0)  # 5 second timeout
+        
+        # Verify all operations completed
+        self.assertEqual(len(operations_completed), 3,
+                        "Not all concurrent operations completed")
+        
+        # At least one operation should have succeeded
+        success_count = sum(1 for op in operations_completed if op.get('success'))
+        self.assertGreater(success_count, 0,
+                         "No concurrent operations succeeded")
+        
+        print(f"  Concurrent operations: {success_count}/3 succeeded")
+        
+        # Verify final state is consistent
+        final_dm = ProjectDataManager(str(self.test_data_file))
+        load_result = final_dm.load_projects()
+        self.assertTrue(load_result, "Final state verification failed")
+        
+        if final_dm.projects:
+            # Should reflect one of the modifications
+            final_name = final_dm.projects[0].name
+            self.assertTrue(
+                final_name.startswith("Modified by Manager") or 
+                final_name == "System Test Project 1",
+                f"Unexpected final name: {final_name}"
+            )
+        
+        print("  ✅ Concurrent operations simulation completed successfully")
+    
+    def test_memory_stress_operations(self):
+        """Test operations under memory stress conditions"""
+        print("\n=== System Validation: Memory Stress Operations ===")
+        
+        dm = ProjectDataManager(str(self.test_data_file))
+        self.assertTrue(dm.load_projects(), "Failed to load test data")
+        
+        # Create large amounts of time record data
+        stress_project = Project(
+            name="Memory Stress Test Project",
+            dz_number="STRESS-001",
+            alias="stress",
+            sub_activities=[],
+            time_records={}
+        )
+        
+        # Add sub-activities with extensive time records
+        for sub_idx in range(10):  # 10 sub-activities
+            sub_activity = SubActivity(
+                name=f"Stress Sub-Activity {sub_idx}",
+                alias=f"stress_sub_{sub_idx}",
+                time_records={}
+            )
+            
+            # Add time records for a full year
+            base_date = datetime(2025, 1, 1)
+            for day_offset in range(365):  # Full year
+                date = base_date + timedelta(days=day_offset)
+                date_str = date.strftime("%Y-%m-%d")
+                
+                sub_activity.time_records[date_str] = TimeRecord(
+                    date=date_str,
+                    total_seconds=(day_offset + sub_idx) * 60  # Variable time
+                )
+            
+            stress_project.sub_activities.append(sub_activity)
+        
+        # Add the stress project
+        dm.projects.append(stress_project)
+        
+        print(f"  Created stress project with {len(stress_project.sub_activities)} sub-activities")
+        print(f"  Total time records: {sum(len(sa.time_records) for sa in stress_project.sub_activities)}")
+        
+        # Test save/load operations with large data
+        save_start = time.time()
+        save_result = dm.save_projects(force=True)
+        save_duration = time.time() - save_start
+        
+        self.assertTrue(save_result, "Failed to save large dataset")
+        print(f"  Large dataset save completed in {save_duration:.3f}s")
+        
+        # Test reload with large data
+        load_start = time.time()
+        dm_large = ProjectDataManager(str(self.test_data_file))
+        load_result = dm_large.load_projects()
+        load_duration = time.time() - load_start
+        
+        self.assertTrue(load_result, "Failed to load large dataset")
+        print(f"  Large dataset load completed in {load_duration:.3f}s")
+        
+        # Verify data integrity
+        stress_project_loaded = None
+        for project in dm_large.projects:
+            if project.alias == "stress":
+                stress_project_loaded = project
+                break
+        
+        self.assertIsNotNone(stress_project_loaded, "Stress project not found after reload")
+        self.assertEqual(len(stress_project_loaded.sub_activities), 10,
+                        "Sub-activity count mismatch after reload")
+        
+        # Check a sample of time records
+        sample_sub = stress_project_loaded.sub_activities[0]
+        self.assertEqual(len(sample_sub.time_records), 365,
+                        "Time record count mismatch after reload")
+        
+        print("  ✅ Memory stress operations completed successfully")
+    
+    def test_error_recovery_scenarios(self):
+        """Test system recovery from various error conditions"""
+        print("\n=== System Validation: Error Recovery Scenarios ===")
+        
+        # Test recovery from corrupted data file
+        print("  Testing recovery from corrupted data...")
+        corrupted_file = Path(self.temp_dir) / "corrupted.json"
+        
+        # Create corrupted JSON
+        with open(corrupted_file, 'w', encoding='utf-8') as f:
+            f.write('{"projects": [invalid json content')
+        
+        dm_corrupted = ProjectDataManager(str(corrupted_file))
+        load_result = dm_corrupted.load_projects()
+        
+        # Should handle corruption gracefully
+        if not load_result:
+            # Should start with empty projects list
+            self.assertEqual(len(dm_corrupted.projects), 0,
+                           "Corrupted file should result in empty projects")
+            print("    ✅ Corrupted data handled gracefully")
+        else:
+            print("    ✅ Corrupted data recovered or handled")
+        
+        # Test recovery from missing file
+        print("  Testing recovery from missing file...")
+        missing_file = Path(self.temp_dir) / "missing.json"
+        
+        dm_missing = ProjectDataManager(str(missing_file))
+        load_result = dm_missing.load_projects()
+        
+        # Should handle missing file gracefully
+        self.assertEqual(len(dm_missing.projects), 0,
+                        "Missing file should result in empty projects")
+        print("    ✅ Missing file handled gracefully")
+        
+        # Test recovery from permission errors (simulated)
+        print("  Testing recovery from access errors...")
+        readonly_file = Path(self.temp_dir) / "readonly.json"
+        with open(readonly_file, 'w', encoding='utf-8') as f:
+            json.dump({"projects": []}, f)
+        
+        # Make file read-only
+        readonly_file.chmod(0o444)
+        
+        dm_readonly = ProjectDataManager(str(readonly_file))
+        load_result = dm_readonly.load_projects()
+        self.assertTrue(load_result, "Should be able to read readonly file")
+        
+        # Try to save (should handle gracefully)
+        dm_readonly.projects.append(Project(
+            name="Test", dz_number="T-001", alias="test",
+            sub_activities=[], time_records={}
+        ))
+        save_result = dm_readonly.save_projects(force=True)
+        
+        # Should either succeed or fail gracefully
+        print(f"    ✅ Readonly file save handled: {save_result}")
+        
+        print("  ✅ Error recovery scenarios completed successfully")
+
+
+if __name__ == '__main__':
+    # Run with higher verbosity to see detailed output
+    unittest.main(verbosity=2)

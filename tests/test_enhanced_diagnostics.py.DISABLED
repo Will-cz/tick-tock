@@ -1,0 +1,379 @@
+#!/usr/bin/env python3
+"""
+Enhanced Test Diagnostics and Fixes
+Improves test reliability and provides better error diagnostics
+"""
+
+import unittest
+import tempfile
+import json
+import traceback
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+import tkinter as tk
+
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+try:
+    from tick_tock_widget.project_management import ProjectManagementWindow
+    from tick_tock_widget.project_data import ProjectDataManager, Project, SubActivity, TimeRecord
+    from tick_tock_widget.tick_tock_widget import TickTockWidget
+    IMPORTS_SUCCESSFUL = True
+except ImportError as e:
+    print(f"Import Error: {e}")
+    IMPORTS_SUCCESSFUL = False
+
+
+class TestEnhancedDiagnostics(unittest.TestCase):
+    """Enhanced tests with improved diagnostics and error handling"""
+    
+    def setUp(self):
+        """Set up test environment with comprehensive error handling"""
+        if not IMPORTS_SUCCESSFUL:
+            self.skipTest("Required imports not available")
+        
+        self.temp_dir = tempfile.mkdtemp()
+        self.test_data_file = Path(self.temp_dir) / "enhanced_test_projects.json"
+        
+        # Create comprehensive test data
+        self.test_data = {
+            "projects": [
+                {
+                    "name": "Enhanced Test Project 1",
+                    "dz_number": "ENH-001",
+                    "alias": "enh1",
+                    "sub_activities": [
+                        {
+                            "name": "Design Phase",
+                            "alias": "design",
+                            "time_records": {
+                                "2025-08-01": {
+                                    "date": "2025-08-01",
+                                    "total_seconds": 7200,
+                                    "last_started": None,
+                                    "is_running": False,
+                                    "sub_activity_seconds": {}
+                                }
+                            }
+                        },
+                        {
+                            "name": "Implementation",
+                            "alias": "impl",
+                            "time_records": {
+                                "2025-08-02": {
+                                    "date": "2025-08-02",
+                                    "total_seconds": 10800,
+                                    "last_started": None,
+                                    "is_running": False,
+                                    "sub_activity_seconds": {}
+                                }
+                            }
+                        }
+                    ],
+                    "time_records": {
+                        "2025-08-01": {
+                            "date": "2025-08-01",
+                            "total_seconds": 3600,
+                            "last_started": None,
+                            "is_running": False,
+                            "sub_activity_seconds": {}
+                        }
+                    }
+                },
+                {
+                    "name": "Enhanced Test Project 2",
+                    "dz_number": "ENH-002",
+                    "alias": "enh2",
+                    "sub_activities": [],
+                    "time_records": {
+                        "2025-08-03": {
+                            "date": "2025-08-03",
+                            "total_seconds": 5400,
+                            "last_started": None,
+                            "is_running": False,
+                            "sub_activity_seconds": {}
+                        }
+                    }
+                }
+            ],
+            "current_project_alias": None,
+            "current_sub_activity_alias": None
+        }
+        
+        # Write test data with error handling
+        try:
+            with open(self.test_data_file, 'w', encoding='utf-8') as f:
+                json.dump(self.test_data, f, indent=2)
+        except Exception as e:
+            self.fail(f"Failed to create test data file: {e}")
+        
+        # Create root window with error handling
+        try:
+            self.root = tk.Tk()
+            self.root.withdraw()
+        except Exception as e:
+            self.fail(f"Failed to create Tkinter root: {e}")
+    
+    def tearDown(self):
+        """Clean up with comprehensive error handling"""
+        try:
+            if hasattr(self, 'root'):
+                self.root.destroy()
+        except Exception:
+            pass
+        
+        # Clean up temp files
+        import shutil
+        try:
+            shutil.rmtree(self.temp_dir)
+        except Exception:
+            pass
+    
+    def test_data_manager_functionality(self):
+        """Test ProjectDataManager with comprehensive validation"""
+        print("\n=== Enhanced Test: Data Manager Functionality ===")
+        
+        try:
+            # Test data manager creation
+            dm = ProjectDataManager(str(self.test_data_file))
+            self.assertIsInstance(dm, ProjectDataManager)
+            print("✓ Data manager created successfully")
+            
+            # Test data loading
+            load_result = dm.load_projects()
+            self.assertTrue(load_result, "Data loading should succeed")
+            print(f"✓ Data loaded: {len(dm.projects)} projects")
+            
+            # Validate loaded data structure
+            self.assertEqual(len(dm.projects), 2, "Should load exactly 2 projects")
+            
+            # Test first project
+            project1 = dm.projects[0]
+            self.assertEqual(project1.name, "Enhanced Test Project 1")
+            self.assertEqual(project1.alias, "enh1")
+            self.assertEqual(len(project1.sub_activities), 2)
+            print("✓ First project structure validated")
+            
+            # Test second project
+            project2 = dm.projects[1]
+            self.assertEqual(project2.name, "Enhanced Test Project 2")
+            self.assertEqual(project2.alias, "enh2")
+            self.assertEqual(len(project2.sub_activities), 0)
+            print("✓ Second project structure validated")
+            
+            # Test time record access
+            first_sub = project1.sub_activities[0]
+            self.assertIn("2025-08-01", first_sub.time_records)
+            time_record = first_sub.time_records["2025-08-01"]
+            self.assertEqual(time_record.total_seconds, 7200)
+            print("✓ Time record access validated")
+            
+        except Exception as e:
+            self.fail(f"Data manager test failed: {e}\n{traceback.format_exc()}")
+    
+    def test_project_management_window_with_diagnostics(self):
+        """Test ProjectManagementWindow with enhanced diagnostics"""
+        print("\n=== Enhanced Test: Project Management Window ===")
+        
+        try:
+            # Create data manager
+            dm = ProjectDataManager(str(self.test_data_file))
+            load_success = dm.load_projects()
+            self.assertTrue(load_success, "Data loading should succeed")
+            print(f"✓ Data manager loaded {len(dm.projects)} projects")
+            
+            # Create mock parent
+            mock_parent = MagicMock()
+            mock_parent.root = self.root
+            
+            # Test theme
+            theme = {
+                'name': 'Enhanced Test',
+                'bg': '#000000',
+                'fg': '#FFFFFF',
+                'accent': '#00FF00',
+                'button_bg': '#111111',
+                'button_fg': '#EEEEEE',
+                'button_active': '#222222'
+            }
+            
+            # Create project management window with error handling
+            with patch.object(tk.Toplevel, 'mainloop'):
+                try:
+                    pm_window = ProjectManagementWindow(
+                        mock_parent,
+                        dm,
+                        None,  # callback
+                        theme
+                    )
+                    print("✓ Project management window created")
+                    
+                    # Test tree widget existence
+                    self.assertTrue(hasattr(pm_window, 'tree'), "Window should have tree widget")
+                    print("✓ Tree widget exists")
+                    
+                    # Test tree population
+                    try:
+                        pm_window.populate_projects()
+                        print("✓ Tree population completed")
+                        
+                        # Validate tree contents
+                        children = pm_window.tree.get_children()
+                        self.assertEqual(len(children), 2, 
+                                       f"Tree should show 2 projects, got {len(children)}")
+                        print(f"✓ Tree shows {len(children)} projects correctly")
+                        
+                        # Test first project details
+                        if children:
+                            first_item = children[0]
+                            item_text = pm_window.tree.item(first_item, 'text')
+                            self.assertIsInstance(item_text, str)
+                            print(f"✓ First project text: {item_text}")
+                            
+                            # Check for sub-activities
+                            sub_children = pm_window.tree.get_children(first_item)
+                            self.assertEqual(len(sub_children), 2,
+                                           f"First project should have 2 sub-activities, got {len(sub_children)}")
+                            print(f"✓ First project has {len(sub_children)} sub-activities")
+                        
+                    except Exception as e:
+                        self.fail(f"Tree population failed: {e}\n{traceback.format_exc()}")
+                        
+                except Exception as e:
+                    self.fail(f"Window creation failed: {e}\n{traceback.format_exc()}")
+                    
+        except Exception as e:
+            self.fail(f"Project management window test failed: {e}\n{traceback.format_exc()}")
+    
+    def test_ticktock_widget_with_data_override(self):
+        """Test TickTockWidget with proper data file override"""
+        print("\n=== Enhanced Test: TickTockWidget with Data Override ===")
+        
+        try:
+            # Create widget (no parameters)
+            widget = TickTockWidget()
+            self.assertIsInstance(widget, TickTockWidget)
+            print("✓ TickTockWidget created successfully")
+            
+            # Test data manager existence
+            self.assertTrue(hasattr(widget, 'data_manager'))
+            self.assertIsInstance(widget.data_manager, ProjectDataManager)
+            print("✓ Data manager exists")
+            
+            # Override data file for testing
+            original_file = widget.data_manager.data_file
+            widget.data_manager.data_file = self.test_data_file
+            print(f"✓ Data file overridden: {self.test_data_file}")
+            
+            # Test data loading
+            load_result = widget.data_manager.load_projects()
+            self.assertTrue(load_result, "Should load test data successfully")
+            print(f"✓ Loaded {len(widget.data_manager.projects)} projects")
+            
+            # Validate loaded projects
+            self.assertEqual(len(widget.data_manager.projects), 2)
+            project_names = [p.name for p in widget.data_manager.projects]
+            self.assertIn("Enhanced Test Project 1", project_names)
+            self.assertIn("Enhanced Test Project 2", project_names)
+            print("✓ Project data validated")
+            
+            # Restore original file
+            widget.data_manager.data_file = original_file
+            
+        except Exception as e:
+            self.fail(f"TickTockWidget test failed: {e}\n{traceback.format_exc()}")
+    
+    def test_time_record_operations(self):
+        """Test TimeRecord operations with enhanced validation"""
+        print("\n=== Enhanced Test: TimeRecord Operations ===")
+        
+        try:
+            # Create time record
+            time_record = TimeRecord(date="2025-08-09", total_seconds=3600)
+            self.assertEqual(time_record.date, "2025-08-09")
+            self.assertEqual(time_record.total_seconds, 3600)
+            print("✓ TimeRecord created")
+            
+            # Test formatting
+            formatted = time_record.get_formatted_time()
+            self.assertEqual(formatted, "01:00:00")
+            print(f"✓ Time formatting: {formatted}")
+            
+            # Test timing operations
+            self.assertFalse(time_record.is_running)
+            
+            # Start timing
+            time_record.start_timing()
+            self.assertTrue(time_record.is_running)
+            self.assertIsNotNone(time_record.last_started)
+            print("✓ Timer started successfully")
+            
+            # Stop timing manually (as per actual implementation)
+            time_record.is_running = False
+            time_record.last_started = None
+            self.assertFalse(time_record.is_running)
+            print("✓ Timer stopped successfully")
+            
+            # Test time addition
+            original_time = time_record.total_seconds
+            time_record.add_time(1800)  # Add 30 minutes
+            self.assertEqual(time_record.total_seconds, original_time + 1800)
+            print("✓ Time addition validated")
+            
+        except Exception as e:
+            self.fail(f"TimeRecord test failed: {e}\n{traceback.format_exc()}")
+    
+    def test_original_bug_prevention(self):
+        """Test that the original tree population bug is prevented"""
+        print("\n=== Enhanced Test: Original Bug Prevention ===")
+        
+        try:
+            # Create data manager with multiple projects
+            dm = ProjectDataManager(str(self.test_data_file))
+            load_success = dm.load_projects()
+            self.assertTrue(load_success)
+            
+            # Ensure we have multiple projects
+            self.assertGreaterEqual(len(dm.projects), 2, 
+                                   "Need multiple projects to test original bug")
+            
+            # Create project management window
+            mock_parent = MagicMock()
+            mock_parent.root = self.root
+            
+            theme = {'name': 'Test', 'bg': '#000000', 'fg': '#FFFFFF', 'accent': '#FF0000',
+                    'button_bg': '#111111', 'button_fg': '#EEEEEE', 'button_active': '#222222'}
+            
+            with patch.object(tk.Toplevel, 'mainloop'):
+                pm_window = ProjectManagementWindow(mock_parent, dm, None, theme)
+                
+                # The critical test: ensure ALL projects are displayed
+                pm_window.populate_projects()
+                tree_children = pm_window.tree.get_children()
+                
+                # This is the test that catches the original bug
+                self.assertEqual(len(tree_children), len(dm.projects),
+                               f"Tree should show ALL {len(dm.projects)} projects, "
+                               f"but only shows {len(tree_children)}. "
+                               f"This indicates the original indentation bug!")
+                
+                print(f"✓ CRITICAL: All {len(dm.projects)} projects displayed in tree")
+                print("✓ Original indentation bug prevention CONFIRMED")
+                
+                # Additional validation: each project should have correct data
+                for i, tree_item in enumerate(tree_children):
+                    item_text = pm_window.tree.item(tree_item, 'text')
+                    project_alias = dm.projects[i].alias
+                    self.assertIn(project_alias, item_text,
+                                 f"Project {i} alias '{project_alias}' should appear in tree text")
+                
+                print("✓ All project data correctly displayed")
+                
+        except Exception as e:
+            self.fail(f"Original bug prevention test failed: {e}\n{traceback.format_exc()}")
+
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)

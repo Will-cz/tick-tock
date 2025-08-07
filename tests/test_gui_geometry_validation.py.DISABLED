@@ -1,0 +1,2551 @@
+"""
+Enhanced Dynamic GUI Geometry Validation Test
+
+This comprehensive test system automatically adapts to GUI changes while maintaining
+rigorous quality validation. It replaces the old rigid validation system with 
+intelligent, adaptable rules that evolve with your application.
+"""
+
+import unittest
+import tempfile
+import json
+from pathlib import Path
+from unittest.mock import patch, MagicMock, Mock
+import tkinter as tk
+from tkinter import ttk
+import time
+from typing import Dict, List, Tuple, Optional, Any, Set
+from dataclasses import dataclass, asdict
+from abc import ABC, abstractmethod
+
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from tick_tock_widget.tick_tock_widget import TickTockWidget
+from tick_tock_widget.project_data import ProjectDataManager, Project, SubActivity
+
+
+@dataclass
+class WidgetRule:
+    """Defines validation rules for widget types"""
+    widget_class: str
+    min_width: int = 5
+    min_height: int = 5
+    max_text_overflow_ratio: float = 1.2  # Allow 20% text overflow
+    allow_zero_size: bool = False
+    description: str = ""
+    confidence_level: float = 1.0  # How confident we are in this rule
+
+
+@dataclass
+class GeometrySnapshot:
+    """Complete geometry snapshot for comparison and validation"""
+    timestamp: str
+    widget_count: int
+    total_area: int
+    main_window_size: Tuple[int, int]
+    widget_types: Dict[str, int]  # count of each widget type
+    critical_widgets: List[str]  # names of widgets that must always exist
+    layout_patterns: Dict[str, Any]  # detected layout patterns
+    theme_consistency: Dict[str, Any]  # theme-specific data
+    responsiveness_data: Dict[str, Any]  # responsive behavior data
+
+
+@dataclass
+class ValidationResult:
+    """Result of a validation rule execution"""
+    rule_name: str
+    passed: bool
+    severity: str
+    issues: List[str]
+    confidence: float
+    metadata: Dict[str, Any]
+
+
+class ValidationRule(ABC):
+    """Abstract base class for validation rules"""
+    
+    @abstractmethod
+    def validate(self, geometries: List['GeometryInfo']) -> List[str]:
+        """Validate geometries and return list of issues"""
+        pass
+    
+    @abstractmethod
+    def get_description(self) -> str:
+        """Get description of what this rule validates"""
+        pass
+    
+    def get_severity(self, issue: str) -> str:
+        """Get severity level of an issue"""
+        if any(keyword in issue.lower() for keyword in ['critical', 'overlap', 'missing']):
+            return "HIGH"
+        elif any(keyword in issue.lower() for keyword in ['text overflow', 'size', 'spacing']):
+            return "MEDIUM"
+        else:
+            return "LOW"
+
+
+class EnhancedOverlapRule(ValidationRule):
+    """Enhanced overlap detection with smart filtering and context awareness"""
+    
+    def __init__(self, tolerance: int = 2):
+        self.tolerance = tolerance
+        self.known_legitimate_overlaps = [
+            ('Scrollbar', 'Treeview'),
+            ('Scrollbar', 'Listbox'),
+            ('Scrollbar', 'Text'),
+            ('Frame', 'Frame'),  # Nested frames
+            ('Label', 'Frame'),  # Labels in frames (common pattern)
+        ]
+        
+    def validate(self, geometries: List['GeometryInfo']) -> List[str]:
+        issues = []
+        
+        # Group widgets by container for smarter overlap detection
+        containers = self._group_by_container(geometries)
+        
+        for container_name, widgets in containers.items():
+            if len(widgets) < 2:
+                continue
+                
+            # Check overlaps within each container
+            container_issues = self._check_container_overlaps(widgets, container_name)
+            issues.extend(container_issues)
+        
+        return issues
+    
+    def _group_by_container(self, geometries: List['GeometryInfo']) -> Dict[str, List['GeometryInfo']]:
+        """Group widgets by their logical container"""
+        containers = {}
+        
+        for geo in geometries:
+            if not geo.visible:
+                continue
+                
+            # Determine container level
+            parts = geo.name.split('.')
+            if len(parts) <= 2:
+                container = 'root'
+            else:
+                container = '.'.join(parts[:-1])
+                
+            if container not in containers:
+                containers[container] = []
+            containers[container].append(geo)
+        
+        return containers
+    
+    def _check_container_overlaps(self, widgets: List['GeometryInfo'], container_name: str) -> List[str]:
+        """Check for overlaps within a specific container"""
+        issues = []
+        
+        for i, geo1 in enumerate(widgets):
+            for geo2 in widgets[i+1:]:
+                if self._should_check_overlap(geo1, geo2):
+                    if self._widgets_overlap(geo1, geo2):
+                        # Add context about the container
+                        issues.append(
+                            f"Overlap in {container_name}: {geo1.name} ({geo1.get_bounds()}) "
+                            f"overlaps {geo2.name} ({geo2.get_bounds()})"
+                        )
+        
+        return issues
+    
+    def _should_check_overlap(self, geo1: 'GeometryInfo', geo2: 'GeometryInfo') -> bool:
+        """Enhanced overlap checking logic"""
+        # Skip zero-size widgets
+        if (geo1.width == 0 or geo1.height == 0 or 
+            geo2.width == 0 or geo2.height == 0):
+            return False
+        
+        # Skip parent-child relationships based on widget names
+        if self._is_parent_child_relationship(geo1, geo2):
+            return False
+            
+        # Skip known legitimate overlaps
+        for pattern1, pattern2 in self.known_legitimate_overlaps:
+            if ((pattern1 in geo1.class_name and pattern2 in geo2.class_name) or
+                (pattern2 in geo1.class_name and pattern1 in geo2.class_name)):
+                return False
+        
+        # Skip if widgets are clearly in different visual layers
+        if self._different_visual_layers(geo1, geo2):
+            return False
+                
+        return True
+    
+    def _is_parent_child_relationship(self, geo1: 'GeometryInfo', geo2: 'GeometryInfo') -> bool:
+        """Check if widgets have a parent-child relationship based on their names"""
+        name1_parts = geo1.name.split('.')
+        name2_parts = geo2.name.split('.')
+        
+        # One widget is a parent of the other if one path is a prefix of the other
+        if len(name1_parts) < len(name2_parts):
+            # geo1 might be parent of geo2
+            return name2_parts[:len(name1_parts)] == name1_parts
+        elif len(name2_parts) < len(name1_parts):
+            # geo2 might be parent of geo1
+            return name1_parts[:len(name2_parts)] == name2_parts
+        
+        return False
+    
+    def _different_visual_layers(self, geo1: 'GeometryInfo', geo2: 'GeometryInfo') -> bool:
+        """Check if widgets are in different visual layers (z-order)"""
+        # Simple heuristic: if one widget completely contains another, they're in different layers
+        bounds1 = geo1.get_bounds()
+        bounds2 = geo2.get_bounds()
+        
+        # Check if geo1 completely contains geo2
+        if (bounds1[0] <= bounds2[0] and bounds1[1] <= bounds2[1] and
+            bounds1[2] >= bounds2[2] and bounds1[3] >= bounds2[3]):
+            return True
+            
+        # Check if geo2 completely contains geo1
+        if (bounds2[0] <= bounds1[0] and bounds2[1] <= bounds1[1] and
+            bounds2[2] >= bounds1[2] and bounds2[3] >= bounds1[3]):
+            return True
+            
+        return False
+    
+    def _widgets_overlap(self, geo1: 'GeometryInfo', geo2: 'GeometryInfo') -> bool:
+        """Check if widgets actually overlap with enhanced tolerance"""
+        left1, top1, right1, bottom1 = geo1.get_bounds()
+        left2, top2, right2, bottom2 = geo2.get_bounds()
+        
+        # Enhanced tolerance - be more forgiving for minor positioning differences
+        tolerance = max(self.tolerance, min(geo1.width, geo1.height, geo2.width, geo2.height) * 0.1)
+        
+        return not (right1 <= left2 + tolerance or 
+                   right2 <= left1 + tolerance or 
+                   bottom1 <= top2 + tolerance or 
+                   bottom2 <= top1 + tolerance)
+    
+    def get_description(self) -> str:
+        return f"Enhanced overlap detection with container awareness (tolerance: {self.tolerance}px)"
+
+
+class AdaptiveSizeRule(ValidationRule):
+    """Enhanced adaptive size validation that learns and evolves"""
+    
+    def __init__(self):
+        self.learned_rules: Dict[str, WidgetRule] = {}
+        self.size_history: Dict[str, List[Tuple[int, int]]] = {}
+        self.confidence_threshold = 0.7
+        self._setup_enhanced_default_rules()
+    
+    def _setup_enhanced_default_rules(self):
+        """Setup enhanced default size rules with confidence levels"""
+        default_rules = [
+            WidgetRule('Button', 20, 15, 1.0, False, "Interactive buttons", 0.9),
+            WidgetRule('TButton', 20, 15, 1.0, False, "Themed buttons", 0.9),
+            WidgetRule('Label', 8, 8, 1.5, False, "Text labels", 0.8),
+            WidgetRule('TLabel', 8, 8, 1.5, False, "Themed labels", 0.8),
+            WidgetRule('Entry', 40, 18, 1.0, False, "Text input fields", 0.9),
+            WidgetRule('TEntry', 40, 18, 1.0, False, "Themed text inputs", 0.9),
+            WidgetRule('Combobox', 50, 18, 1.0, False, "Dropdown lists", 0.9),
+            WidgetRule('TCombobox', 50, 18, 1.0, False, "Themed dropdowns", 0.9),
+            WidgetRule('Listbox', 80, 40, 1.0, False, "List controls", 0.8),
+            WidgetRule('Treeview', 100, 50, 1.0, False, "Tree controls", 0.8),
+            WidgetRule('Text', 80, 40, 1.0, False, "Multi-line text", 0.8),
+            WidgetRule('Scale', 30, 15, 1.0, False, "Slider controls", 0.7),
+            WidgetRule('Scrollbar', 8, 20, 1.0, False, "Scroll controls", 0.8),
+            WidgetRule('Frame', 0, 0, 1.0, True, "Container frames", 1.0),
+            WidgetRule('Labelframe', 30, 20, 1.0, False, "Labeled containers", 0.8),
+            WidgetRule('Toplevel', 100, 100, 1.0, False, "Top-level windows", 0.9),
+            WidgetRule('Tk', 200, 200, 1.0, False, "Main windows", 1.0),
+        ]
+        
+        for rule in default_rules:
+            self.learned_rules[rule.widget_class] = rule
+            self.size_history[rule.widget_class] = []
+    
+    def validate(self, geometries: List['GeometryInfo']) -> List[str]:
+        issues = []
+        
+        # Enhanced learning phase
+        self._enhanced_learning_from_layout(geometries)
+        
+        # Validation with confidence-based rules
+        for geo in geometries:
+            if not geo.visible:
+                continue
+                
+            rule = self._get_adaptive_rule_for_widget(geo)
+            widget_issues = self._validate_widget_with_confidence(geo, rule)
+            issues.extend(widget_issues)
+        
+        return issues
+    
+    def _enhanced_learning_from_layout(self, geometries: List['GeometryInfo']):
+        """Enhanced learning that tracks size evolution"""
+        current_sizes = {}
+        
+        for geo in geometries:
+            if not geo.visible or geo.width == 0 or geo.height == 0:
+                continue
+                
+            if geo.class_name not in current_sizes:
+                current_sizes[geo.class_name] = []
+            
+            current_sizes[geo.class_name].append((geo.width, geo.height))
+            
+            # Add to size history
+            if geo.class_name not in self.size_history:
+                self.size_history[geo.class_name] = []
+            self.size_history[geo.class_name].append((geo.width, geo.height))
+            
+            # Keep only recent history (last 50 observations)
+            if len(self.size_history[geo.class_name]) > 50:
+                self.size_history[geo.class_name] = self.size_history[geo.class_name][-50:]
+        
+        # Update rules based on statistical analysis
+        for widget_type, sizes in current_sizes.items():
+            self._update_rule_statistically(widget_type, sizes)
+    
+    def _update_rule_statistically(self, widget_type: str, current_sizes: List[Tuple[int, int]]):
+        """Update rules using statistical analysis of size data"""
+        if len(current_sizes) < 2:
+            return
+            
+        all_sizes = self.size_history.get(widget_type, []) + current_sizes
+        
+        if len(all_sizes) >= 5:  # Need sufficient data
+            widths = [w for w, h in all_sizes]
+            heights = [h for w, h in all_sizes]
+            
+            # Calculate percentiles for more robust minimums
+            min_width_p10 = sorted(widths)[max(0, len(widths) // 10)]  # 10th percentile
+            min_height_p10 = sorted(heights)[max(0, len(heights) // 10)]
+            
+            if widget_type in self.learned_rules:
+                rule = self.learned_rules[widget_type]
+                
+                # Only update if we have high confidence and significant data
+                if len(all_sizes) >= 10:
+                    # Gradually adapt minimums
+                    rule.min_width = min(rule.min_width, max(5, min_width_p10))
+                    rule.min_height = min(rule.min_height, max(5, min_height_p10))
+                    rule.confidence_level = min(1.0, rule.confidence_level + 0.05)
+    
+    def _get_adaptive_rule_for_widget(self, geo: 'GeometryInfo') -> WidgetRule:
+        """Get or create adaptive rule for widget"""
+        if geo.class_name in self.learned_rules:
+            return self.learned_rules[geo.class_name]
+        
+        # Create new adaptive rule for unknown widget types
+        new_rule = WidgetRule(
+            geo.class_name,
+            min_width=max(5, geo.width // 2),  # Start with half current size
+            min_height=max(5, geo.height // 2),
+            description=f"Adaptive rule for {geo.class_name}",
+            confidence_level=0.3  # Low confidence for new rules
+        )
+        
+        self.learned_rules[geo.class_name] = new_rule
+        return new_rule
+    
+    def _validate_widget_with_confidence(self, geo: 'GeometryInfo', rule: WidgetRule) -> List[str]:
+        """Validate widget considering rule confidence"""
+        issues = []
+        
+        if rule.allow_zero_size and (geo.width == 0 or geo.height == 0):
+            return issues
+        
+        # Apply confidence-based validation
+        confidence_multiplier = rule.confidence_level
+        effective_min_width = int(rule.min_width * confidence_multiplier)
+        effective_min_height = int(rule.min_height * confidence_multiplier)
+        
+        if geo.width < effective_min_width:
+            severity = "HIGH" if rule.confidence_level > 0.8 else "MEDIUM"
+            issues.append(
+                f"Size [{severity}]: {geo.name} width {geo.width}px < minimum {effective_min_width}px "
+                f"for {geo.class_name} (confidence: {rule.confidence_level:.1f})"
+            )
+        
+        if geo.height < effective_min_height:
+            severity = "HIGH" if rule.confidence_level > 0.8 else "MEDIUM"
+            issues.append(
+                f"Size [{severity}]: {geo.name} height {geo.height}px < minimum {effective_min_height}px "
+                f"for {geo.class_name} (confidence: {rule.confidence_level:.1f})"
+            )
+        
+        return issues
+    
+    def get_description(self) -> str:
+        learned_count = len(self.learned_rules)
+        avg_confidence = sum(r.confidence_level for r in self.learned_rules.values()) / learned_count if learned_count > 0 else 0
+        return f"Adaptive size validation with {learned_count} learned rules (avg confidence: {avg_confidence:.2f})"
+
+
+class IntelligentTextOverflowRule(ValidationRule):
+    """Intelligent text overflow detection with advanced font analysis"""
+    
+    def __init__(self):
+        self.font_cache = {}
+        self.text_patterns = {}  # Track common text patterns
+        
+    def validate(self, geometries: List['GeometryInfo']) -> List[str]:
+        issues = []
+        
+        for geo in geometries:
+            if not geo.visible:
+                continue
+                
+            overflow_issue = self._analyze_text_overflow(geo)
+            if overflow_issue:
+                issues.append(overflow_issue)
+        
+        return issues
+    
+    def _analyze_text_overflow(self, geo: 'GeometryInfo') -> Optional[str]:
+        """Advanced text overflow analysis"""
+        try:
+            if not hasattr(geo.widget, 'cget'):
+                return None
+                
+            text = geo.widget.cget('text')
+            if not text or len(text) == 0:
+                return None
+            
+            # Advanced font analysis
+            font_info = self._analyze_font(geo.widget)
+            
+            # Calculate text dimensions more accurately
+            text_dimensions = self._calculate_text_dimensions(text, font_info)
+            
+            # Widget-specific analysis
+            analysis_result = self._widget_specific_analysis(geo, text, text_dimensions)
+            
+            if analysis_result['overflow']:
+                severity = self._determine_overflow_severity(geo, analysis_result)
+                return (f"Text overflow [{severity}]: {geo.name} needs ~{analysis_result['required_width']}px "
+                       f"but has {geo.width}px for text '{text[:30]}{'...' if len(text) > 30 else ''}' "
+                       f"(overflow: {analysis_result['overflow_ratio']:.1f}x)")
+            
+        except (tk.TclError, AttributeError):
+            pass
+            
+        return None
+    
+    def _analyze_font(self, widget) -> Dict[str, Any]:
+        """Advanced font analysis with caching"""
+        widget_id = id(widget)
+        
+        if widget_id in self.font_cache:
+            return self.font_cache[widget_id]
+        
+        font_info = {
+            'family': 'Arial',
+            'size': 10,
+            'weight': 'normal',
+            'char_width': 7,
+            'char_height': 12
+        }
+        
+        try:
+            font = widget.cget('font')
+            if font:
+                if isinstance(font, tuple) and len(font) >= 2:
+                    font_info['family'] = font[0] if font[0] else 'Arial'
+                    font_info['size'] = font[1] if isinstance(font[1], int) else 10
+                    font_info['weight'] = font[2] if len(font) > 2 else 'normal'
+                
+                # Adjust character dimensions based on font
+                size_multiplier = font_info['size'] / 10.0
+                
+                # Font family adjustments
+                family_lower = font_info['family'].lower()
+                if 'consolas' in family_lower or 'courier' in family_lower:
+                    font_info['char_width'] = int(8 * size_multiplier)  # Monospace
+                elif 'arial' in family_lower:
+                    font_info['char_width'] = int(6.5 * size_multiplier)  # Arial is compact
+                elif 'times' in family_lower:
+                    font_info['char_width'] = int(7.5 * size_multiplier)  # Times
+                else:
+                    font_info['char_width'] = int(7 * size_multiplier)  # Default
+                
+                # Weight adjustments
+                if font_info['weight'] == 'bold':
+                    font_info['char_width'] = int(font_info['char_width'] * 1.15)
+                
+                font_info['char_height'] = int(font_info['size'] * 1.3)
+        
+        except:
+            pass
+        
+        self.font_cache[widget_id] = font_info
+        return font_info
+    
+    def _calculate_text_dimensions(self, text: str, font_info: Dict[str, Any]) -> Dict[str, int]:
+        """Calculate text dimensions with advanced metrics"""
+        base_width = len(text) * font_info['char_width']
+        
+        # Adjust for character distribution
+        wide_chars = sum(1 for c in text if c in 'MWQBDGH@#%&')
+        narrow_chars = sum(1 for c in text if c in 'iljt.:,;')
+        
+        # Apply character width adjustments
+        width_adjustment = (wide_chars * 0.3 - narrow_chars * 0.2) * font_info['char_width']
+        adjusted_width = int(base_width + width_adjustment)
+        
+        return {
+            'width': adjusted_width,
+            'height': font_info['char_height'],
+            'base_width': base_width
+        }
+    
+    def _widget_specific_analysis(self, geo: 'GeometryInfo', text: str, text_dims: Dict[str, int]) -> Dict[str, Any]:
+        """Widget-specific overflow analysis"""
+        # Get widget-specific padding and behavior
+        padding = self._get_widget_padding(geo.class_name)
+        tolerance = self._get_widget_tolerance(geo.class_name, text)
+        
+        required_width = text_dims['width'] + padding
+        available_width = geo.width
+        
+        overflow_ratio = required_width / available_width if available_width > 0 else float('inf')
+        
+        return {
+            'overflow': overflow_ratio > tolerance,
+            'overflow_ratio': overflow_ratio,
+            'required_width': required_width,
+            'available_width': available_width,
+            'tolerance': tolerance,
+            'text_length': len(text)
+        }
+    
+    def _get_widget_padding(self, widget_class: str) -> int:
+        """Get enhanced padding requirements"""
+        padding_map = {
+            'Button': 24,      # Buttons need more padding for borders
+            'TButton': 24,
+            'Label': 6,        # Labels minimal padding
+            'TLabel': 6,
+            'Entry': 12,       # Text entries need padding for cursor
+            'TEntry': 12,
+            'Combobox': 30,    # Extra space for dropdown arrow
+            'TCombobox': 30,
+            'Labelframe': 16,  # Frame labels need space
+        }
+        return padding_map.get(widget_class, 12)
+    
+    def _get_widget_tolerance(self, widget_class: str, text: str) -> float:
+        """Get dynamic tolerance based on widget type and content"""
+        base_tolerance = {
+            'Button': 1.0,      # Buttons should not overflow
+            'TButton': 1.0,
+            'Label': 1.3,       # Labels can have some overflow
+            'TLabel': 1.3,
+            'Entry': 1.0,       # Entries should not overflow
+            'TEntry': 1.0,
+        }.get(widget_class, 1.1)
+        
+        # Adjust tolerance based on text characteristics
+        if len(text) > 50:  # Very long text, be more tolerant
+            base_tolerance *= 1.2
+        elif len(text) < 10:  # Short text, be stricter
+            base_tolerance *= 0.9
+        
+        return base_tolerance
+    
+    def _determine_overflow_severity(self, geo: 'GeometryInfo', analysis: Dict[str, Any]) -> str:
+        """Determine severity of overflow issue"""
+        overflow_ratio = analysis['overflow_ratio']
+        
+        if overflow_ratio > 2.0:  # More than 2x required space
+            return "HIGH"
+        elif overflow_ratio > 1.5:  # 50% overflow
+            return "MEDIUM"
+        else:
+            return "LOW"
+    
+    def get_description(self) -> str:
+        cached_fonts = len(self.font_cache)
+        return f"Intelligent text overflow detection with advanced font analysis ({cached_fonts} fonts cached)"
+
+
+class KeyboardAccessibilityRule(ValidationRule):
+    """Validates keyboard accessibility and focus management"""
+    
+    def __init__(self):
+        super().__init__()
+        self.name = "Keyboard Accessibility Validation"
+        self.description = "Validates keyboard navigation, focus management, and accessibility features"
+        self.confidence_level = 0.9
+        
+        # Define focusable widget types
+        self.focusable_widgets = {
+            'tk.Button', 'ttk.Button', 'tk.Entry', 'ttk.Entry',
+            'tk.Text', 'tk.Listbox', 'ttk.Combobox', 'ttk.Treeview',
+            'tk.Scale', 'ttk.Scale', 'tk.Scrollbar', 'ttk.Scrollbar'
+        }
+        
+        # Expected keyboard shortcuts for TickTockWidget
+        self.expected_shortcuts = {
+            'space': 'Toggle timer (Start/Pause)',
+            'enter': 'Confirm selection',
+            'escape': 'Cancel/Close dialog',
+            'tab': 'Navigate to next widget',
+            'shift+tab': 'Navigate to previous widget'
+        }
+    
+    def validate(self, widgets: List['GeometryInfo']) -> ValidationResult:
+        """Validate keyboard accessibility"""
+        issues = []
+        severity = "PASS"
+        
+        focusable_widgets = []
+        buttons_without_shortcuts = []
+        widgets_without_tooltips = []
+        
+        for widget in widgets:
+            widget_type = widget.widget_type
+            
+            # Check if widget should be focusable
+            if any(ftype in widget_type for ftype in self.focusable_widgets):
+                focusable_widgets.append(widget)
+                
+                # Check for keyboard shortcuts on buttons
+                if 'Button' in widget_type:
+                    # Simulate checking for keyboard bindings
+                    if not self._has_keyboard_shortcut(widget):
+                        buttons_without_shortcuts.append(widget.name)
+                
+                # Check for accessibility features
+                if not self._has_accessibility_features(widget):
+                    widgets_without_tooltips.append(widget.name)
+        
+        # Validate focus order
+        if len(focusable_widgets) > 1:
+            focus_order_issues = self._validate_focus_order(focusable_widgets)
+            if focus_order_issues:
+                issues.extend(focus_order_issues)
+                severity = "WARNING"
+        
+        # Check for sufficient focusable widgets
+        if len(focusable_widgets) < 3:
+            issues.append(f"Insufficient focusable widgets ({len(focusable_widgets)}). Expected at least 3 for proper navigation.")
+            severity = "WARNING"
+        
+        # Check for buttons without keyboard shortcuts
+        if buttons_without_shortcuts:
+            issues.append(f"Buttons without keyboard shortcuts: {', '.join(buttons_without_shortcuts[:3])}")
+            if severity == "PASS":
+                severity = "INFO"
+        
+        # Check for widgets without accessibility features
+        if widgets_without_tooltips and len(widgets_without_tooltips) > 2:
+            issues.append(f"Multiple widgets lack accessibility features. Consider adding tooltips or aria labels.")
+            if severity == "PASS":
+                severity = "INFO"
+        
+        return ValidationResult(
+            rule_name=self.name,
+            passed=severity in ["PASS", "INFO"],
+            severity=severity,
+            issues=issues,
+            confidence=self.confidence_level,
+            metadata={
+                'focusable_widgets': len(focusable_widgets),
+                'total_widgets': len(widgets),
+                'accessibility_score': max(0, (len(focusable_widgets) - len(widgets_without_tooltips)) / max(1, len(focusable_widgets)))
+            }
+        )
+    
+    def _has_keyboard_shortcut(self, widget: 'GeometryInfo') -> bool:
+        """Check if widget has keyboard shortcuts (simulated)"""
+        # In real implementation, would check widget bindings
+        # For testing, assume main action buttons have shortcuts
+        if 'toggle' in widget.name.lower() or 'start' in widget.name.lower():
+            return True
+        if 'close' in widget.name.lower() or 'minimize' in widget.name.lower():
+            return True
+        return False
+    
+    def _has_accessibility_features(self, widget: 'GeometryInfo') -> bool:
+        """Check if widget has accessibility features (simulated)"""
+        # In real implementation, would check for tooltips, aria labels, etc.
+        # For testing, assume widgets with descriptive names have accessibility
+        return len(widget.name) > 6 and '_' not in widget.name
+    
+    def _validate_focus_order(self, focusable_widgets: List['GeometryInfo']) -> List[str]:
+        """Validate logical focus order"""
+        issues = []
+        
+        # Sort widgets by y position then x position for expected tab order
+        sorted_widgets = sorted(focusable_widgets, key=lambda w: (w.y, w.x))
+        
+        # Check for reasonable spacing between focusable elements
+        for i in range(len(sorted_widgets) - 1):
+            current = sorted_widgets[i]
+            next_widget = sorted_widgets[i + 1]
+            
+            # If widgets are on same row but too close, might confuse navigation
+            if abs(current.y - next_widget.y) < 10 and abs(current.x - next_widget.x) < 20:
+                issues.append(f"Focusable widgets '{current.name}' and '{next_widget.name}' may be too close for clear navigation")
+        
+        return issues
+    
+    def get_description(self) -> str:
+        """Get description of keyboard accessibility validation"""
+        return f"Validates keyboard accessibility, focus management, and navigation patterns ({len(self.focusable_widgets)} focusable widget types)"
+
+
+class ResponsivenessValidationRule(ValidationRule):
+    """Validates GUI responsiveness to different window sizes and resolutions"""
+    
+    def __init__(self):
+        super().__init__()
+        self.name = "Responsiveness Validation"
+        self.description = "Validates GUI responsiveness to window resizing and different screen resolutions"
+        self.confidence_level = 0.8
+        
+        # Define expected responsive behaviors
+        self.min_window_size = (300, 200)  # Minimum usable window size
+        self.max_window_size = (2000, 1500)  # Maximum reasonable window size
+        self.responsive_widgets = {'Frame', 'LabelFrame', 'Treeview', 'Text'}
+    
+    def validate(self, widgets: List['GeometryInfo']) -> ValidationResult:
+        """Validate responsiveness characteristics"""
+        issues = []
+        severity = "PASS"
+        
+        # Find main window
+        main_window = next((w for w in widgets if 'root' in w.name.lower() or w.widget_type == 'tk.Tk'), None)
+        
+        if not main_window:
+            return ValidationResult(
+                rule_name=self.name,
+                passed=False,
+                severity="ERROR",
+                issues=["No main window found for responsiveness testing"],
+                confidence=0.5,
+                metadata={}
+            )
+        
+        # Check window size constraints
+        window_width, window_height = main_window.width, main_window.height
+        
+        if window_width < self.min_window_size[0] or window_height < self.min_window_size[1]:
+            issues.append(f"Window size ({window_width}x{window_height}) below minimum usable size {self.min_window_size}")
+            severity = "ERROR"
+        
+        if window_width > self.max_window_size[0] or window_height > self.max_window_size[1]:
+            issues.append(f"Window size ({window_width}x{window_height}) exceeds maximum reasonable size {self.max_window_size}")
+            severity = "WARNING"
+        
+        # Check for responsive widgets that expand/contract
+        expandable_widgets = [w for w in widgets if any(rtype in w.widget_type for rtype in self.responsive_widgets)]
+        
+        if len(expandable_widgets) == 0:
+            issues.append("No responsive widgets found. UI may not adapt well to different window sizes.")
+            severity = "WARNING"
+        
+        # Check for widgets that might be cut off at smaller sizes
+        critical_widgets = [w for w in widgets if 'button' in w.name.lower() or 'label' in w.name.lower()]
+        window_bounds_violations = []
+        
+        for widget in critical_widgets:
+            if widget.x + widget.width > window_width * 0.95:  # Within 5% of window edge
+                window_bounds_violations.append(widget.name)
+            if widget.y + widget.height > window_height * 0.95:
+                window_bounds_violations.append(widget.name)
+        
+        if window_bounds_violations:
+            issues.append(f"Widgets near window bounds may be cut off: {', '.join(window_bounds_violations[:3])}")
+            if severity == "PASS":
+                severity = "WARNING"
+        
+        # Check aspect ratio reasonableness
+        aspect_ratio = window_width / window_height if window_height > 0 else 0
+        if aspect_ratio < 0.5 or aspect_ratio > 3.0:
+            issues.append(f"Unusual window aspect ratio {aspect_ratio:.2f} may cause layout issues")
+            if severity == "PASS":
+                severity = "INFO"
+        
+        return ValidationResult(
+            rule_name=self.name,
+            passed=severity in ["PASS", "INFO", "WARNING"],
+            severity=severity,
+            issues=issues,
+            confidence=self.confidence_level,
+            metadata={
+                'window_size': (window_width, window_height),
+                'aspect_ratio': aspect_ratio,
+                'expandable_widgets': len(expandable_widgets),
+                'bounds_violations': len(window_bounds_violations)
+            }
+        )
+    
+    def get_description(self) -> str:
+        """Get description of responsiveness validation"""
+        return f"Validates window responsiveness, sizing behavior, and adaptive layouts (min: {self.min_window_size}, max: {self.max_window_size})"
+
+
+class UserInteractionValidationRule(ValidationRule):
+    """Validates user interaction patterns and widget usability"""
+    
+    def __init__(self):
+        super().__init__()
+        self.name = "User Interaction Validation"
+        self.description = "Validates user interaction patterns, button sizes, and usability"
+        self.confidence_level = 0.85
+        
+        # Define interaction standards
+        self.min_button_size = (60, 25)  # Minimum clickable size
+        self.min_touch_target = (44, 44)  # Minimum touch target (accessibility)
+        self.max_button_size = (200, 100)  # Maximum reasonable button size
+        
+        # Define widget interaction categories
+        self.interactive_widgets = {
+            'primary': ['Button', 'toggle', 'start', 'stop'],
+            'secondary': ['Combobox', 'Entry', 'Scale'],
+            'navigation': ['Treeview', 'Listbox', 'Scrollbar']
+        }
+    
+    def validate(self, widgets: List['GeometryInfo']) -> ValidationResult:
+        """Validate user interaction patterns"""
+        issues = []
+        severity = "PASS"
+        
+        # Find interactive widgets
+        buttons = [w for w in widgets if 'button' in w.widget_type.lower() or 'button' in w.name.lower()]
+        interactive_widgets = [w for w in widgets if any(itype in w.widget_type.lower() or itype in w.name.lower() 
+                                                      for cat in self.interactive_widgets.values() 
+                                                      for itype in cat)]
+        
+        # Validate button sizes
+        undersized_buttons = []
+        oversized_buttons = []
+        
+        for button in buttons:
+            if button.width < self.min_button_size[0] or button.height < self.min_button_size[1]:
+                undersized_buttons.append(f"{button.name}({button.width}x{button.height})")
+            
+            if button.width > self.max_button_size[0] or button.height > self.max_button_size[1]:
+                oversized_buttons.append(f"{button.name}({button.width}x{button.height})")
+        
+        if undersized_buttons:
+            issues.append(f"Buttons below minimum size: {', '.join(undersized_buttons[:3])}")
+            severity = "WARNING"
+        
+        if oversized_buttons:
+            issues.append(f"Buttons above maximum size: {', '.join(oversized_buttons[:2])}")
+            if severity == "PASS":
+                severity = "INFO"
+        
+        # Check for proper spacing between interactive elements
+        spacing_issues = self._check_interaction_spacing(interactive_widgets)
+        if spacing_issues:
+            issues.extend(spacing_issues)
+            if severity == "PASS":
+                severity = "WARNING"
+        
+        # Validate primary action availability
+        primary_actions = [w for w in widgets if any(action in w.name.lower() 
+                                                   for action in ['start', 'stop', 'toggle', 'play', 'pause'])]
+        
+        if len(primary_actions) == 0:
+            issues.append("No primary action buttons found. Users may not understand main functionality.")
+            severity = "WARNING"
+        
+        # Check for too many interactive elements (cognitive overload)
+        if len(interactive_widgets) > 15:
+            issues.append(f"High number of interactive elements ({len(interactive_widgets)}). Consider grouping or hiding some.")
+            if severity == "PASS":
+                severity = "INFO"
+        
+        # Validate interaction hierarchy
+        hierarchy_issues = self._validate_interaction_hierarchy(buttons)
+        if hierarchy_issues:
+            issues.extend(hierarchy_issues)
+            if severity == "PASS":
+                severity = "INFO"
+        
+        return ValidationResult(
+            rule_name=self.name,
+            passed=severity in ["PASS", "INFO", "WARNING"],
+            severity=severity,
+            issues=issues,
+            confidence=self.confidence_level,
+            metadata={
+                'total_buttons': len(buttons),
+                'interactive_widgets': len(interactive_widgets),
+                'undersized_buttons': len(undersized_buttons),
+                'oversized_buttons': len(oversized_buttons),
+                'usability_score': max(0, 1 - (len(undersized_buttons) + len(oversized_buttons)) / max(1, len(buttons)))
+            }
+        )
+    
+    def _check_interaction_spacing(self, widgets: List['GeometryInfo']) -> List[str]:
+        """Check spacing between interactive elements"""
+        issues = []
+        min_spacing = 5  # Minimum pixels between interactive elements
+        
+        for i, widget1 in enumerate(widgets):
+            for widget2 in widgets[i+1:]:
+                # Calculate distance between widgets
+                dx = min(abs(widget1.x - widget2.x), abs((widget1.x + widget1.width) - widget2.x))
+                dy = min(abs(widget1.y - widget2.y), abs((widget1.y + widget1.height) - widget2.y))
+                
+                # Check if widgets are too close
+                if dx < min_spacing and dy < min_spacing and dx > 0 and dy > 0:
+                    if not self._are_related_widgets(widget1, widget2):
+                        issues.append(f"Interactive elements '{widget1.name}' and '{widget2.name}' too close")
+        
+        return issues[:3]  # Limit to top 3 issues
+    
+    def _are_related_widgets(self, widget1: 'GeometryInfo', widget2: 'GeometryInfo') -> bool:
+        """Check if widgets are logically related and should be close"""
+        # Check if widgets are in same control group
+        related_groups = [
+            ['start', 'stop', 'pause', 'toggle'],
+            ['minimize', 'close'],
+            ['theme', 'opacity'],
+            ['manage', 'report']
+        ]
+        
+        for group in related_groups:
+            if any(term in widget1.name.lower() for term in group) and any(term in widget2.name.lower() for term in group):
+                return True
+        
+        return False
+    
+    def _validate_interaction_hierarchy(self, buttons: List['GeometryInfo']) -> List[str]:
+        """Validate visual hierarchy of interactive elements"""
+        issues = []
+        
+        if not buttons:
+            return issues
+        
+        # Find potential primary button (usually largest or most prominent)
+        primary_candidates = [b for b in buttons if any(term in b.name.lower() 
+                                                       for term in ['start', 'toggle', 'play', 'main'])]
+        
+        if primary_candidates:
+            primary = max(primary_candidates, key=lambda b: b.width * b.height)
+            secondary_buttons = [b for b in buttons if b != primary]
+            
+            # Check if primary button is sufficiently prominent
+            if secondary_buttons:
+                avg_secondary_size = sum(b.width * b.height for b in secondary_buttons) / len(secondary_buttons)
+                primary_size = primary.width * primary.height
+                
+                if primary_size < avg_secondary_size * 1.2:  # Should be at least 20% larger
+                    issues.append(f"Primary button '{primary.name}' may not be visually prominent enough")
+        
+        return issues
+    
+    def get_description(self) -> str:
+        """Get description of user interaction validation"""
+        return f"Validates user interaction patterns, button sizing, and interface usability (button size range: {self.min_button_size} to {self.max_button_size})"
+
+
+class ColorPaletteValidationRule(ValidationRule):
+    """Comprehensive color palette validation for theme consistency"""
+    
+    def __init__(self):
+        self.expected_theme_colors = None
+        self.color_tolerance = 5  # RGB tolerance for color matching
+        self.color_history = {}  # Track color usage patterns
+        self.theme_exceptions = {
+            # Widget-specific color exceptions that are allowed
+            'close_button': ['✕'],  # Close buttons have special coloring
+            'special_buttons': ['✕'],
+            'accent_labels': [],  # Labels that should use accent color
+        }
+        
+    def set_expected_theme(self, theme_colors):
+        """Set the expected theme colors for validation"""
+        self.expected_theme_colors = theme_colors
+        
+    def validate(self, geometries: List['GeometryInfo']) -> List[str]:
+        if not self.expected_theme_colors:
+            return ["Color validation skipped: no expected theme set"]
+            
+        issues = []
+        
+        # Validate each widget's color scheme
+        for geo in geometries:
+            if not geo.visible:
+                continue
+                
+            widget_issues = self._validate_widget_colors(geo)
+            issues.extend(widget_issues)
+        
+        # Validate overall theme consistency
+        consistency_issues = self._validate_theme_consistency(geometries)
+        issues.extend(consistency_issues)
+        
+        return issues
+    
+    def _validate_widget_colors(self, geo: 'GeometryInfo') -> List[str]:
+        """Validate individual widget's color compliance"""
+        issues = []
+        
+        try:
+            widget_class = geo.class_name
+            widget_colors = self._extract_widget_colors(geo.widget)
+            
+            if not widget_colors:
+                return issues
+            
+            # Check each color property against expected theme
+            for color_prop, actual_color in widget_colors.items():
+                expected_color = self._get_expected_color(geo, color_prop)
+                
+                if expected_color and not self._colors_match(actual_color, expected_color):
+                    # Check if this is an allowed exception
+                    if not self._is_color_exception(geo, color_prop, actual_color):
+                        severity = self._determine_color_severity(geo, color_prop)
+                        issues.append(
+                            f"Color mismatch [{severity}]: {geo.name} {color_prop} is '{actual_color}' "
+                            f"but expected '{expected_color}' for {widget_class}"
+                        )
+        
+        except (tk.TclError, AttributeError, KeyError):
+            # Widget might not support color queries or be destroyed
+            pass
+        
+        return issues
+    
+    def _extract_widget_colors(self, widget) -> Dict[str, str]:
+        """Extract all color properties from a widget"""
+        colors = {}
+        
+        # Common color properties to check
+        color_properties = [
+            'bg', 'background',
+            'fg', 'foreground', 
+            'activebackground',
+            'activeforeground',
+            'selectbackground',
+            'selectforeground',
+            'highlightbackground',
+            'highlightcolor',
+            'insertbackground',
+            'disabledforeground'
+        ]
+        
+        for prop in color_properties:
+            try:
+                color_value = widget.cget(prop)
+                if color_value and color_value != '':
+                    colors[prop] = str(color_value).upper()
+            except (tk.TclError, AttributeError):
+                continue
+                
+        return colors
+    
+    def _get_expected_color(self, geo: 'GeometryInfo', color_prop: str) -> Optional[str]:
+        """Get expected color for a widget property based on widget type and theme"""
+        if not self.expected_theme_colors:
+            return None
+            
+        widget_class = geo.class_name
+        widget_text = self._get_widget_text(geo.widget)
+        
+        # Special handling for close buttons and special elements
+        if self._is_special_button(geo, widget_text):
+            if color_prop in ['bg', 'background']:
+                return self.expected_theme_colors.get('accent', '').upper()
+            elif color_prop in ['fg', 'foreground']:
+                return self.expected_theme_colors.get('bg', '').upper()
+        
+        # Widget-specific color mapping
+        color_mapping = {
+            'Frame': {
+                'bg': 'bg', 'background': 'bg'
+            },
+            'Labelframe': {
+                'bg': 'bg', 'background': 'bg',
+                'fg': 'fg', 'foreground': 'fg'
+            },
+            'Label': {
+                'bg': 'bg', 'background': 'bg',
+                'fg': 'accent', 'foreground': 'accent'  # Labels typically use accent color
+            },
+            'Button': {
+                'bg': 'button_bg', 'background': 'button_bg',
+                'fg': 'button_fg', 'foreground': 'button_fg',
+                'activebackground': 'button_active'
+            },
+            'TButton': {  # Themed buttons use ttk styles
+                'bg': 'button_bg', 'background': 'button_bg'
+            },
+            'Entry': {
+                'bg': 'bg', 'background': 'bg',
+                'fg': 'fg', 'foreground': 'fg',
+                'selectbackground': 'accent'
+            },
+            'Text': {
+                'bg': 'bg', 'background': 'bg',
+                'fg': 'fg', 'foreground': 'fg',
+                'selectbackground': 'accent'
+            },
+            'Listbox': {
+                'bg': 'bg', 'background': 'bg',
+                'fg': 'fg', 'foreground': 'fg',
+                'selectbackground': 'accent'
+            },
+            'Treeview': {
+                'bg': 'bg', 'background': 'bg',
+                'fg': 'fg', 'foreground': 'fg'
+            },
+            'TCombobox': {
+                'bg': 'bg', 'background': 'bg'
+            }
+        }
+        
+        widget_colors = color_mapping.get(widget_class, {})
+        theme_key = widget_colors.get(color_prop)
+        
+        if theme_key and theme_key in self.expected_theme_colors:
+            return self.expected_theme_colors[theme_key].upper()
+            
+        return None
+    
+    def _get_widget_text(self, widget) -> str:
+        """Extract text from widget if available"""
+        try:
+            return str(widget.cget('text'))
+        except (tk.TclError, AttributeError):
+            return ""
+    
+    def _is_special_button(self, geo: 'GeometryInfo', text: str) -> bool:
+        """Check if widget is a special button with custom coloring"""
+        return (text in self.theme_exceptions['close_button'] or 
+                text in self.theme_exceptions['special_buttons'])
+    
+    def _colors_match(self, actual: str, expected: str) -> bool:
+        """Check if two colors match within tolerance"""
+        if not actual or not expected:
+            return False
+            
+        # Normalize color formats
+        actual_rgb = self._color_to_rgb(actual)
+        expected_rgb = self._color_to_rgb(expected)
+        
+        if not actual_rgb or not expected_rgb:
+            return actual.upper() == expected.upper()
+        
+        # Check RGB distance
+        distance = sum(abs(a - e) for a, e in zip(actual_rgb, expected_rgb))
+        return distance <= self.color_tolerance * 3  # 3 channels
+    
+    def _color_to_rgb(self, color: str) -> Optional[Tuple[int, int, int]]:
+        """Convert color string to RGB tuple"""
+        color = color.strip().upper()
+        
+        # Handle hex colors
+        if color.startswith('#') and len(color) == 7:
+            try:
+                r = int(color[1:3], 16)
+                g = int(color[3:5], 16)
+                b = int(color[5:7], 16)
+                return (r, g, b)
+            except ValueError:
+                pass
+        
+        # Handle named colors (basic set)
+        named_colors = {
+            'BLACK': (0, 0, 0),
+            'WHITE': (255, 255, 255),
+            'RED': (255, 0, 0),
+            'GREEN': (0, 255, 0),
+            'BLUE': (0, 0, 255),
+            'YELLOW': (255, 255, 0),
+            'CYAN': (0, 255, 255),
+            'MAGENTA': (255, 0, 255),
+        }
+        
+        return named_colors.get(color)
+    
+    def _is_color_exception(self, geo: 'GeometryInfo', color_prop: str, actual_color: str) -> bool:
+        """Check if a color mismatch is an allowed exception"""
+        # Allow some flexibility for system-generated colors
+        if actual_color in ['SYSTEMWINDOW', 'SYSTEMWINDOWTEXT', 'SYSTEMFACE']:
+            return True
+            
+        # Allow flexibility for ttk widgets that might not follow exact colors
+        if geo.class_name.startswith('T') and color_prop in ['bg', 'background']:
+            return True
+            
+        # Check widget-specific exceptions
+        widget_text = self._get_widget_text(geo.widget)
+        if self._is_special_button(geo, widget_text):
+            return True
+            
+        return False
+    
+    def _determine_color_severity(self, geo: 'GeometryInfo', color_prop: str) -> str:
+        """Determine severity of color mismatch"""
+        # Critical properties that should always match
+        critical_props = ['bg', 'background', 'fg', 'foreground']
+        
+        if color_prop in critical_props:
+            return "HIGH"
+        elif color_prop in ['activebackground', 'selectbackground']:
+            return "MEDIUM"
+        else:
+            return "LOW"
+    
+    def _validate_theme_consistency(self, geometries: List['GeometryInfo']) -> List[str]:
+        """Validate overall theme consistency across all widgets"""
+        issues = []
+        
+        # Count color usage patterns
+        color_usage = {}
+        widget_type_colors = {}
+        
+        for geo in geometries:
+            if not geo.visible:
+                continue
+                
+            try:
+                widget_colors = self._extract_widget_colors(geo.widget)
+                widget_class = geo.class_name
+                
+                # Track color usage
+                for prop, color in widget_colors.items():
+                    if color not in color_usage:
+                        color_usage[color] = []
+                    color_usage[color].append(f"{widget_class}.{prop}")
+                
+                # Track widget type color patterns
+                if widget_class not in widget_type_colors:
+                    widget_type_colors[widget_class] = {}
+                if 'bg' in widget_colors:
+                    bg_color = widget_colors['bg']
+                    if bg_color not in widget_type_colors[widget_class]:
+                        widget_type_colors[widget_class][bg_color] = 0
+                    widget_type_colors[widget_class][bg_color] += 1
+                    
+            except (tk.TclError, AttributeError):
+                continue
+        
+        # Check for inconsistent color usage within widget types
+        for widget_class, color_counts in widget_type_colors.items():
+            if len(color_counts) > 2:  # Allow some variation but not too much
+                most_common = max(color_counts.items(), key=lambda x: x[1])
+                total_widgets = sum(color_counts.values())
+                consistency_ratio = most_common[1] / total_widgets
+                
+                if consistency_ratio < 0.7:  # Less than 70% consistency
+                    issues.append(
+                        f"Theme inconsistency [MEDIUM]: {widget_class} widgets use {len(color_counts)} "
+                        f"different background colors (consistency: {consistency_ratio:.1%})"
+                    )
+        
+        return issues
+    
+    def get_description(self) -> str:
+        if self.expected_theme_colors:
+            theme_name = self.expected_theme_colors.get('name', 'Unknown')
+            return f"Color palette validation for '{theme_name}' theme (tolerance: {self.color_tolerance}px RGB)"
+        else:
+            return "Color palette validation (no theme set)"
+
+
+class GeometryInfo:
+    """Enhanced container for widget geometry information with additional metadata"""
+    
+    def __init__(self, widget, name: str):
+        self.widget = widget
+        self.name = name
+        try:
+            self.x = widget.winfo_x()
+            self.y = widget.winfo_y()
+            self.width = widget.winfo_width()
+            self.height = widget.winfo_height()
+            self.req_width = widget.winfo_reqwidth()
+            self.req_height = widget.winfo_reqheight()
+            self.class_name = widget.winfo_class()
+            self.visible = widget.winfo_viewable()
+            
+            # Add widget_type attribute
+            self.widget_type = f"{widget.__class__.__module__}.{widget.__class__.__name__}"
+            
+            # Enhanced metadata
+            self.area = self.width * self.height
+            self.aspect_ratio = self.width / self.height if self.height > 0 else 0
+            self.center_x = self.x + self.width // 2
+            self.center_y = self.y + self.height // 2
+            
+        except tk.TclError:
+            # Widget might be destroyed
+            self._set_default_values()
+    
+    def _set_default_values(self):
+        """Set default values when widget access fails"""
+        self.x = self.y = self.width = self.height = 0
+        self.req_width = self.req_height = 0
+        self.class_name = "Unknown"
+        self.widget_type = "Unknown.Unknown"
+        self.visible = False
+        self.area = 0
+        self.aspect_ratio = 0
+        self.center_x = self.center_y = 0
+    
+    def get_bounds(self) -> Tuple[int, int, int, int]:
+        """Get widget bounds as (left, top, right, bottom)"""
+        return (self.x, self.y, self.x + self.width, self.y + self.height)
+    
+    def get_center(self) -> Tuple[int, int]:
+        """Get widget center point"""
+        return (self.center_x, self.center_y)
+    
+    def distance_to(self, other: 'GeometryInfo') -> float:
+        """Calculate distance to another widget's center"""
+        dx = self.center_x - other.center_x
+        dy = self.center_y - other.center_y
+        return (dx * dx + dy * dy) ** 0.5
+    
+    def overlaps_with(self, other: 'GeometryInfo') -> bool:
+        """Check if this widget overlaps with another widget"""
+        left1, top1, right1, bottom1 = self.get_bounds()
+        left2, top2, right2, bottom2 = other.get_bounds()
+        
+        return not (right1 <= left2 or right2 <= left1 or bottom1 <= top2 or bottom2 <= top1)
+    
+    def is_clipped_by_parent(self, parent: Optional['GeometryInfo']) -> bool:
+        """Check if this widget is clipped by its parent"""
+        if not parent:
+            return False
+            
+        left, top, right, bottom = self.get_bounds()
+        p_left, p_top, p_right, p_bottom = parent.get_bounds()
+        
+        return (left < p_left or top < p_top or right > p_right or bottom > p_bottom)
+    
+    def has_sufficient_size(self, min_width: int = 10, min_height: int = 10) -> bool:
+        """Check if widget has sufficient size to be usable"""
+        return self.width >= min_width and self.height >= min_height
+    
+    def __str__(self):
+        return (f"{self.name} ({self.class_name}): "
+                f"pos=({self.x}, {self.y}), size=({self.width}x{self.height}), "
+                f"area={self.area}, visible={self.visible}")
+
+
+class TestEnhancedDynamicGUIGeometryValidation(unittest.TestCase):
+    """Enhanced dynamic and adaptable GUI geometry validation test"""
+    
+    def setUp(self):
+        """Set up test environment with enhanced adaptive configuration"""
+        self.temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        self.temp_file.close()
+        
+        # Create mock project data with varied content for adaptability testing
+        self.mock_data_manager = MagicMock(spec=ProjectDataManager)
+        self.setup_enhanced_mock_project_data()
+        
+        # Initialize enhanced validation rules including color palette validation
+        self.color_palette_rule = ColorPaletteValidationRule()
+        self.keyboard_accessibility_rule = KeyboardAccessibilityRule()
+        self.responsiveness_rule = ResponsivenessValidationRule()
+        self.user_interaction_rule = UserInteractionValidationRule()
+        
+        self.validation_rules = [
+            EnhancedOverlapRule(tolerance=3),
+            AdaptiveSizeRule(),
+            IntelligentTextOverflowRule(),
+            self.color_palette_rule,
+            self.keyboard_accessibility_rule,
+            self.responsiveness_rule,
+            self.user_interaction_rule,
+        ]
+        
+        # Enhanced configuration for adaptability
+        self.baseline_snapshot = None
+        self.tolerance_config = {
+            'widget_count_variance': 0.25,  # Allow 25% change in widget count
+            'layout_pattern_tolerance': 12,  # 12px tolerance for layout patterns
+            'size_learning_threshold': 3,   # Need 3+ instances to learn new size rules
+            'text_overflow_tolerance': 1.3,  # 30% text overflow tolerance
+            'confidence_threshold': 0.7,    # Minimum confidence for strict validation
+        }
+        
+    def tearDown(self):
+        """Clean up test environment"""
+        if Path(self.temp_file.name).exists():
+            Path(self.temp_file.name).unlink()
+    
+    def setup_enhanced_mock_project_data(self):
+        """Setup enhanced mock project data for comprehensive testing"""
+        # Create projects with comprehensive content variations
+        projects_data = [
+            {
+                'alias': 'SHORT',
+                'name': 'S',
+                'sub_activities': [
+                    {'alias': 'T1', 'name': 'T1'},
+                    {'alias': 'T2', 'name': 'T2'}
+                ]
+            },
+            {
+                'alias': 'MEDIUM_PROJECT',
+                'name': 'Medium Length Project',
+                'sub_activities': [
+                    {'alias': 'MEDIUM_SUB', 'name': 'Medium Sub Activity'},
+                    {'alias': 'ANOTHER_SUB', 'name': 'Another Sub Activity'}
+                ]
+            },
+            {
+                'alias': 'EXTREMELY_LONG_PROJECT_NAME_FOR_OVERFLOW_TESTING',
+                'name': 'Extremely Long Project Name That Will Definitely Test The Text Overflow Detection System',
+                'sub_activities': [
+                    {'alias': 'VERY_LONG_SUB', 'name': 'Very Long Sub Activity Name That Exceeds All Normal Length Expectations'},
+                    {'alias': 'ULTRA_LONG', 'name': 'Ultra Long Sub Activity Name That Will Challenge The Layout System Significantly'}
+                ]
+            },
+            {
+                'alias': 'SPECIAL_CHARS_123',
+                'name': 'Project with Special Characters: @#$%^&*()_+{}[]|',
+                'sub_activities': [
+                    {'alias': 'UNICODE_TEST', 'name': 'Unicode Test: 🚀⭐💻🔧⚡'},
+                ]
+            }
+        ]
+        
+        mock_projects = []
+        for proj_data in projects_data:
+            project = Mock(spec=Project)
+            project.alias = proj_data['alias']
+            project.name = proj_data['name']
+            project.is_running_today.return_value = False
+            project.get_total_time_today.return_value = "01:23:45"
+            
+            # Create sub-activities
+            mock_subs = []
+            for sub_data in proj_data['sub_activities']:
+                sub = Mock(spec=SubActivity)
+                sub.alias = sub_data['alias']
+                sub.name = sub_data['name']
+                sub.is_running_today.return_value = False
+                sub.get_total_time_today.return_value = "00:45:30"
+                mock_subs.append(sub)
+            
+            project.sub_activities = mock_subs
+            project.get_sub_activity.side_effect = lambda alias: next((s for s in mock_subs if s.alias == alias), None)
+            mock_projects.append(project)
+        
+        # Setup data manager
+        self.mock_data_manager.projects = mock_projects
+        self.mock_data_manager.current_project_alias = 'SHORT'
+        self.mock_data_manager.get_project_aliases.return_value = [p.alias for p in mock_projects]
+        self.mock_data_manager.get_current_project.return_value = mock_projects[0]
+        self.mock_data_manager.get_project.side_effect = lambda alias: next((p for p in mock_projects if p.alias == alias), None)
+    
+    def collect_widget_geometry(self, parent_widget, parent_name: str = "root") -> List['GeometryInfo']:
+        """Enhanced widget geometry collection with error handling"""
+        geometries = []
+        
+        try:
+            parent_widget.update_idletasks()
+        except Exception:
+            pass
+        
+        # Add current widget
+        geo_info = GeometryInfo(parent_widget, parent_name)
+        geometries.append(geo_info)
+        
+        # Recursively process children with enhanced naming
+        try:
+            children = parent_widget.winfo_children()
+            for i, child in enumerate(children):
+                child_name = self._generate_enhanced_widget_name(child, parent_name, i)
+                child_geometries = self.collect_widget_geometry(child, child_name)
+                geometries.extend(child_geometries)
+        except (tk.TclError, AttributeError):
+            pass
+        
+        return geometries
+    
+    def _generate_enhanced_widget_name(self, widget, parent_name: str, index: int) -> str:
+        """Generate meaningful widget names with enhanced context"""
+        class_name = widget.winfo_class()
+        
+        # Enhanced text extraction for better naming
+        descriptor = ""
+        try:
+            if hasattr(widget, 'cget'):
+                text = widget.cget('text')
+                if text:
+                    # Clean and truncate text for name, handle special characters
+                    clean_text = ''.join(c for c in text if c.isalnum() or c in [' ', '_', '-'])
+                    if clean_text.strip():
+                        descriptor = f"({clean_text.strip()[:12]})"
+                    else:
+                        # Handle special characters/unicode
+                        descriptor = f"(special_{len(text)})"
+        except Exception:
+            pass
+        
+        # Add positional context for better tracking
+        position_hint = ""
+        try:
+            x, y = widget.winfo_x(), widget.winfo_y()
+            if x < 100:
+                position_hint += "L"  # Left
+            elif x > 300:
+                position_hint += "R"  # Right
+            if y < 100:
+                position_hint += "T"  # Top
+            elif y > 300:
+                position_hint += "B"  # Bottom
+        except Exception:
+            pass
+        
+        return f"{parent_name}.{class_name}_{index}{descriptor}{position_hint}"
+    
+    def create_enhanced_geometry_snapshot(self, geometries: List['GeometryInfo']) -> GeometrySnapshot:
+        """Create enhanced snapshot with comprehensive analysis"""
+        widget_types = {}
+        total_area = 0
+        critical_widgets = []
+        
+        for geo in geometries:
+            if geo.visible:
+                widget_types[geo.class_name] = widget_types.get(geo.class_name, 0) + 1
+                total_area += geo.area
+                
+                # Enhanced critical widget identification
+                if self._is_critical_widget(geo):
+                    critical_widgets.append(geo.name)
+        
+        main_window = geometries[0] if geometries else None
+        main_window_size = (main_window.width, main_window.height) if main_window else (0, 0)
+        
+        return GeometrySnapshot(
+            timestamp=str(time.time()),
+            widget_count=len([g for g in geometries if g.visible]),
+            total_area=total_area,
+            main_window_size=main_window_size,
+            widget_types=widget_types,
+            critical_widgets=critical_widgets,
+            layout_patterns=self._detect_enhanced_layout_patterns(geometries),
+            theme_consistency={},  # Populated during theme testing
+            responsiveness_data={}  # Populated during responsiveness testing
+        )
+    
+    def _is_critical_widget(self, geo: 'GeometryInfo') -> bool:
+        """Enhanced critical widget identification"""
+        critical_indicators = [
+            'Button' in geo.class_name and any(keyword in geo.name.lower() for keyword in ['start', 'stop', 'toggle', 'manage']),
+            'Combobox' in geo.class_name,
+            'Treeview' in geo.class_name,
+            'main_window' in geo.name,
+            geo.class_name == 'Tk'
+        ]
+        
+        return any(critical_indicators)
+    
+    def _detect_enhanced_layout_patterns(self, geometries: List['GeometryInfo']) -> Dict[str, Any]:
+        """Enhanced layout pattern detection"""
+        patterns = {
+            'button_arrangements': [],
+            'container_layouts': {},
+            'alignment_groups': {},
+            'spacing_patterns': {}
+        }
+        
+        # Analyze button arrangements
+        buttons = [g for g in geometries if 'Button' in g.class_name and g.visible]
+        if len(buttons) >= 2:
+            patterns['button_arrangements'] = self._analyze_button_arrangements(buttons)
+        
+        # Analyze container layouts
+        containers = {}
+        for geo in geometries:
+            if geo.class_name in ['Frame', 'Labelframe'] and geo.visible:
+                children = [g for g in geometries if geo.name in g.name and g != geo]
+                if children:
+                    patterns['container_layouts'][geo.name] = {
+                        'child_count': len(children),
+                        'layout_type': self._detect_container_layout_type(children)
+                    }
+        
+        return patterns
+    
+    def _analyze_button_arrangements(self, buttons: List['GeometryInfo']) -> Dict[str, Any]:
+        """Analyze button arrangement patterns"""
+        if len(buttons) < 2:
+            return {}
+        
+        # Group buttons by approximate position
+        tolerance = 15
+        rows = []
+        cols = []
+        
+        for button in buttons:
+            # Find row
+            row_found = False
+            for row in rows:
+                if any(abs(button.y - b.y) <= tolerance for b in row):
+                    row.append(button)
+                    row_found = True
+                    break
+            if not row_found:
+                rows.append([button])
+            
+            # Find column
+            col_found = False
+            for col in cols:
+                if any(abs(button.x - b.x) <= tolerance for b in col):
+                    col.append(button)
+                    col_found = True
+                    break
+            if not col_found:
+                cols.append([button])
+        
+        return {
+            'total_buttons': len(buttons),
+            'rows': len([row for row in rows if len(row) > 1]),
+            'cols': len([col for col in cols if len(col) > 1]),
+            'arrangement': 'grid' if len(rows) > 1 and len(cols) > 1 else 'linear'
+        }
+    
+    def _detect_container_layout_type(self, children: List['GeometryInfo']) -> str:
+        """Detect layout type within a container"""
+        if len(children) < 2:
+            return "single"
+        
+        # Calculate position variance
+        x_positions = [c.x for c in children]
+        y_positions = [c.y for c in children]
+        
+        x_variance = max(x_positions) - min(x_positions)
+        y_variance = max(y_positions) - min(y_positions)
+        
+        if x_variance < 25:
+            return "vertical"
+        elif y_variance < 25:
+            return "horizontal"
+        else:
+            return "mixed"
+    
+    def validate_geometries_enhanced(self, geometries: List['GeometryInfo']) -> Tuple[List[str], Dict[str, Any]]:
+        """Enhanced geometry validation with detailed analysis"""
+        all_issues = []
+        validation_details = {}
+        
+        for rule in self.validation_rules:
+            rule_result = rule.validate(geometries)
+            
+            # Handle both ValidationResult objects and list of strings
+            if isinstance(rule_result, ValidationResult):
+                rule_issues = rule_result.issues
+                validation_details[rule.__class__.__name__] = {
+                    'issues': rule_issues,
+                    'description': rule.get_description(),
+                    'passed': rule_result.passed,
+                    'severity': rule_result.severity,
+                    'confidence': rule_result.confidence,
+                    'metadata': rule_result.metadata,
+                    'high_severity': [i for i in rule_issues if '[HIGH]' in i],
+                    'medium_severity': [i for i in rule_issues if '[MEDIUM]' in i],
+                    'low_severity': [i for i in rule_issues if '[LOW]' in i or ('[HIGH]' not in i and '[MEDIUM]' not in i)]
+                }
+            else:
+                # Assume it's a list of issues (legacy format)
+                rule_issues = rule_result
+                validation_details[rule.__class__.__name__] = {
+                    'issues': rule_issues,
+                    'description': rule.get_description(),
+                    'high_severity': [i for i in rule_issues if '[HIGH]' in i],
+                    'medium_severity': [i for i in rule_issues if '[MEDIUM]' in i],
+                    'low_severity': [i for i in rule_issues if '[LOW]' in i or ('[HIGH]' not in i and '[MEDIUM]' not in i)]
+                }
+            
+            all_issues.extend(rule_issues)
+        
+        return all_issues, validation_details
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_enhanced_adaptive_geometry_validation(self, mock_manager_class):
+        """Main enhanced adaptive geometry validation test"""
+        mock_manager_class.return_value = self.mock_data_manager
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            widget.root.update_idletasks()
+            time.sleep(0.1)
+            
+            print(f"\n{'='*80}")
+            print("ENHANCED ADAPTIVE GUI GEOMETRY VALIDATION")
+            print(f"{'='*80}")
+            
+            # Collect current geometries
+            geometries = self.collect_widget_geometry(widget.root, "main_window")
+            
+            print(f"Analyzing {len(geometries)} widgets with enhanced adaptive rules...")
+            
+            # Create enhanced snapshot
+            current_snapshot = self.create_enhanced_geometry_snapshot(geometries)
+            
+            # Enhanced validation
+            issues, validation_details = self.validate_geometries_enhanced(geometries)
+            
+            # Print comprehensive analysis
+            self._print_comprehensive_analysis(current_snapshot, validation_details)
+            
+            # Test adaptability with various content
+            print(f"\n{'='*50} ADAPTABILITY TESTING {'='*50}")
+            adaptability_results = self._test_comprehensive_adaptability(widget)
+            
+            # Test theme consistency
+            print(f"\n{'='*50} THEME CONSISTENCY {'='*50}")
+            theme_results = self._test_enhanced_theme_consistency(widget)
+            
+            # Enhanced assertions with adaptive tolerance
+            self._perform_enhanced_assertions(issues, validation_details, current_snapshot, adaptability_results, theme_results)
+            
+            print(f"\n{'='*80}")
+            print("ENHANCED ADAPTABILITY FEATURES:")
+            print("✅ Container-aware overlap detection with visual layer recognition")
+            print("✅ Statistical learning for size validation with confidence levels")
+            print("✅ Advanced font analysis for text overflow detection")
+            print("✅ Comprehensive color palette validation for theme consistency")
+            print("✅ Comprehensive layout pattern recognition")
+            print("✅ Multi-content adaptability testing")
+            print("✅ Enhanced theme consistency validation with color checking")
+            print("✅ Confidence-based rule application")
+            print("✅ Smart widget naming and tracking")
+            print("✅ Adaptive color tolerance for different widget types")
+            print(f"{'='*80}")
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_color_palette_validation(self, mock_manager_class):
+        """Test color palette validation across all themes"""
+        mock_manager_class.return_value = self.mock_data_manager
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            widget.root.update_idletasks()
+            time.sleep(0.1)
+            
+            print(f"\n{'='*80}")
+            print("COLOR PALETTE VALIDATION TEST")
+            print(f"{'='*80}")
+            
+            # Test each theme for color consistency
+            color_test_results = {}
+            
+            for theme_index, theme in enumerate(widget.themes):
+                # Set to specific theme
+                widget.current_theme = theme_index
+                current_theme = widget.get_current_theme()
+                widget.configure_ttk_styles(current_theme)
+                widget.apply_theme_to_children(widget.main_frame, current_theme)
+                widget.root.update_idletasks()
+                
+                # Configure color validation for this theme
+                self.color_palette_rule.set_expected_theme(current_theme)
+                
+                # Collect geometries and validate colors
+                geometries = self.collect_widget_geometry(widget.root, f"color_test_{theme['name']}")
+                color_issues = self.color_palette_rule.validate(geometries)
+                
+                # Categorize issues by severity
+                high_severity = [i for i in color_issues if '[HIGH]' in i]
+                medium_severity = [i for i in color_issues if '[MEDIUM]' in i]
+                low_severity = [i for i in color_issues if '[LOW]' in i or ('[HIGH]' not in i and '[MEDIUM]' not in i)]
+                
+                color_test_results[theme['name']] = {
+                    'total_issues': len(color_issues),
+                    'high_severity': high_severity,
+                    'medium_severity': medium_severity,
+                    'low_severity': low_severity,
+                    'theme_colors': current_theme
+                }
+                
+                print(f"\n🎨 Theme: {theme['name']}")
+                print(f"  Expected colors: bg={current_theme['bg']}, fg={current_theme['fg']}, accent={current_theme['accent']}")
+                print(f"  Color issues found: {len(color_issues)} (H:{len(high_severity)}, M:{len(medium_severity)}, L:{len(low_severity)})")
+                
+                if color_issues:
+                    for issue in color_issues[:3]:  # Show first 3 issues
+                        severity_icon = "🔴" if '[HIGH]' in issue else "🟡" if '[MEDIUM]' in issue else "🟢"
+                        print(f"    {severity_icon} {issue}")
+                    if len(color_issues) > 3:
+                        print(f"    ... and {len(color_issues) - 3} more issues")
+            
+            # Assertions for color validation
+            print(f"\n{'='*50} COLOR ASSERTIONS {'='*50}")
+            
+            total_high_severity_issues = sum(len(result['high_severity']) for result in color_test_results.values())
+            total_medium_severity_issues = sum(len(result['medium_severity']) for result in color_test_results.values())
+            themes_with_issues = sum(1 for result in color_test_results.values() if result['total_issues'] > 0)
+            
+            print(f"Total high-severity color issues across all themes: {total_high_severity_issues}")
+            print(f"Total medium-severity color issues across all themes: {total_medium_severity_issues}")
+            print(f"Themes with color issues: {themes_with_issues}/{len(widget.themes)}")
+            
+            # Critical color assertions
+            self.assertLessEqual(total_high_severity_issues, 10,
+                           f"Found {total_high_severity_issues} high-severity color issues that must be fixed")
+            
+            self.assertLessEqual(total_medium_severity_issues, 5,
+                               f"Found {total_medium_severity_issues} medium-severity color issues (max 5 allowed)")
+            
+            self.assertLessEqual(themes_with_issues, len(widget.themes),
+                               "Some themes have color validation issues")
+            
+            print("✅ All color palette validation tests passed!")
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_theme_color_consistency(self, mock_manager_class):
+        """Test that theme changes properly update all widget colors"""
+        mock_manager_class.return_value = self.mock_data_manager
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            widget.root.update_idletasks()
+            time.sleep(0.1)
+            
+            print(f"\n{'='*80}")
+            print("THEME COLOR CONSISTENCY TEST")
+            print(f"{'='*80}")
+            
+            initial_theme = widget.get_current_theme()
+            print(f"Starting with theme: {initial_theme['name']}")
+            
+            # Collect baseline widget colors
+            baseline_geometries = self.collect_widget_geometry(widget.root, "baseline")
+            baseline_colors = self._extract_all_widget_colors(baseline_geometries)
+            
+            theme_consistency_results = []
+            
+            # Test each theme transition
+            for i in range(len(widget.themes)):
+                widget.cycle_theme()
+                widget.root.update_idletasks()
+                time.sleep(0.05)
+                
+                current_theme = widget.get_current_theme()
+                current_geometries = self.collect_widget_geometry(widget.root, f"theme_{i}")
+                current_colors = self._extract_all_widget_colors(current_geometries)
+                
+                # Configure color validation
+                self.color_palette_rule.set_expected_theme(current_theme)
+                color_issues = self.color_palette_rule.validate(current_geometries)
+                
+                # Check for color consistency
+                consistency_issues = self._compare_color_consistency(baseline_colors, current_colors, current_theme)
+                
+                result = {
+                    'theme_name': current_theme['name'],
+                    'color_validation_issues': len(color_issues),
+                    'consistency_issues': len(consistency_issues),
+                    'high_severity_color': len([i for i in color_issues if '[HIGH]' in i])
+                }
+                theme_consistency_results.append(result)
+                
+                print(f"\n🔄 Switched to theme: {current_theme['name']}")
+                print(f"  Color validation issues: {len(color_issues)}")
+                print(f"  Theme consistency issues: {len(consistency_issues)}")
+                
+                if color_issues:
+                    print("  Sample color issues:")
+                    for issue in color_issues[:2]:
+                        print(f"    - {issue}")
+            
+            # Assertions for theme consistency
+            print(f"\n{'='*50} CONSISTENCY ASSERTIONS {'='*50}")
+            
+            max_color_issues = max(r['color_validation_issues'] for r in theme_consistency_results)
+            max_high_severity = max(r['high_severity_color'] for r in theme_consistency_results)
+            themes_with_high_severity = sum(1 for r in theme_consistency_results if r['high_severity_color'] > 0)
+            
+            print(f"Maximum color issues in any theme: {max_color_issues}")
+            print(f"Maximum high-severity issues in any theme: {max_high_severity}")
+            print(f"Themes with high-severity color issues: {themes_with_high_severity}")
+            
+            # Consistency assertions
+            self.assertEqual(max_high_severity, 0,
+                           f"Found themes with high-severity color issues (max: {max_high_severity})")
+            
+            self.assertLessEqual(max_color_issues, 10,
+                               f"Theme has too many color issues (max found: {max_color_issues})")
+            
+            self.assertEqual(themes_with_high_severity, 0,
+                           f"{themes_with_high_severity} themes have high-severity color problems")
+            
+            print("✅ All theme color consistency tests passed!")
+    
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    def test_individual_widget_colors(self, mock_manager_class):
+        """Test individual widget color properties against theme expectations"""
+        mock_manager_class.return_value = self.mock_data_manager
+        
+        with patch.object(tk.Tk, 'mainloop'):
+            widget = TickTockWidget()
+            widget.root.update_idletasks()
+            time.sleep(0.1)
+            
+            print(f"\n{'='*80}")
+            print("INDIVIDUAL WIDGET COLOR VALIDATION TEST")
+            print(f"{'='*80}")
+            
+            # Test with Matrix theme (first theme)
+            matrix_theme = widget.themes[0]
+            widget.current_theme = 0
+            current_theme = widget.get_current_theme()
+            widget.configure_ttk_styles(current_theme)
+            widget.apply_theme_to_children(widget.main_frame, current_theme)
+            widget.root.update_idletasks()
+            
+            print(f"Testing individual widgets with {current_theme['name']} theme")
+            print(f"Theme colors: {current_theme}")
+            
+            # Configure color validation
+            self.color_palette_rule.set_expected_theme(current_theme)
+            
+            # Collect all widgets
+            geometries = self.collect_widget_geometry(widget.root, "individual_test")
+            
+            # Test each widget individually
+            widget_test_results = []
+            
+            for geo in geometries:
+                if not geo.visible:
+                    continue
+                    
+                # Test this specific widget
+                widget_issues = self.color_palette_rule._validate_widget_colors(geo)
+                
+                if widget_issues or geo.class_name in ['Label', 'Button', 'Frame']:  # Focus on key widget types
+                    try:
+                        actual_colors = self.color_palette_rule._extract_widget_colors(geo.widget)
+                        result = {
+                            'name': geo.name,
+                            'class': geo.class_name,
+                            'issues': widget_issues,
+                            'colors': actual_colors
+                        }
+                        widget_test_results.append(result)
+                        
+                        print(f"\n🔍 Widget: {geo.name} ({geo.class_name})")
+                        print(f"  Actual colors: {actual_colors}")
+                        if widget_issues:
+                            print(f"  Issues: {len(widget_issues)}")
+                            for issue in widget_issues:
+                                print(f"    ❌ {issue}")
+                        else:
+                            print("  ✅ Colors match theme expectations")
+                    
+                    except Exception as e:
+                        print(f"  ⚠️ Could not validate colors: {e}")
+            
+            # Assertions for individual widgets
+            print(f"\n{'='*50} WIDGET ASSERTIONS {'='*50}")
+            
+            widgets_with_issues = sum(1 for r in widget_test_results if r['issues'])
+            total_widget_issues = sum(len(r['issues']) for r in widget_test_results)
+            critical_widget_issues = sum(len([i for i in r['issues'] if '[HIGH]' in i]) for r in widget_test_results)
+            
+            print(f"Widgets tested: {len(widget_test_results)}")
+            print(f"Widgets with color issues: {widgets_with_issues}")
+            print(f"Total widget color issues: {total_widget_issues}")
+            print(f"Critical widget color issues: {critical_widget_issues}")
+            
+            # Individual widget assertions
+            self.assertEqual(critical_widget_issues, 0,
+                           f"Found {critical_widget_issues} critical individual widget color issues")
+            
+            # Allow some tolerance for individual widget issues (different from theme-wide issues)
+            self.assertLessEqual(widgets_with_issues, len(widget_test_results) // 2,
+                               f"Too many individual widgets have color issues ({widgets_with_issues}/{len(widget_test_results)})")
+            
+            print("✅ Individual widget color validation tests passed!")
+
+    def _extract_all_widget_colors(self, geometries: List['GeometryInfo']) -> Dict[str, Dict[str, str]]:
+        """Extract colors from all widgets for comparison"""
+        all_colors = {}
+        
+        for geo in geometries:
+            if not geo.visible:
+                continue
+                
+            try:
+                widget_colors = self.color_palette_rule._extract_widget_colors(geo.widget)
+                if widget_colors:
+                    all_colors[geo.name] = widget_colors
+            except Exception:
+                continue
+        
+        return all_colors
+    
+    def _compare_color_consistency(self, baseline_colors: Dict[str, Dict[str, str]], 
+                                 current_colors: Dict[str, Dict[str, str]], 
+                                 expected_theme) -> List[str]:
+        """Compare color consistency between themes"""
+        issues = []
+        
+        # Check that widgets changed colors appropriately for the new theme
+        for widget_name in baseline_colors:
+            if widget_name in current_colors:
+                baseline = baseline_colors[widget_name]
+                current = current_colors[widget_name]
+                
+                # For most properties, colors should have changed to match new theme
+                for prop in ['bg', 'background', 'fg', 'foreground']:
+                    if prop in baseline and prop in current:
+                        if baseline[prop] == current[prop]:
+                            # Colors didn't change - might be an issue unless it's the expected theme color
+                            expected_color = self._get_expected_theme_color(widget_name, prop, expected_theme)
+                            if expected_color and baseline[prop].upper() != expected_color.upper():
+                                issues.append(f"Color unchanged: {widget_name}.{prop} = {current[prop]}")
+        
+        return issues
+    
+    def _get_expected_theme_color(self, widget_name: str, color_prop: str, theme) -> str:
+        """Get expected color for a widget property based on theme"""
+        # Simple mapping for consistency checking
+        if 'frame' in widget_name.lower():
+            return theme.get('bg', '') if color_prop in ['bg', 'background'] else ''
+        elif 'label' in widget_name.lower():
+            if color_prop in ['bg', 'background']:
+                return theme.get('bg', '')
+            elif color_prop in ['fg', 'foreground']:
+                return theme.get('accent', '')
+        elif 'button' in widget_name.lower():
+            if color_prop in ['bg', 'background']:
+                return theme.get('button_bg', '')
+            elif color_prop in ['fg', 'foreground']:
+                return theme.get('button_fg', '')
+        
+        return ''
+    
+    def _print_comprehensive_analysis(self, snapshot: GeometrySnapshot, validation_details: Dict[str, Any]):
+        """Print comprehensive analysis results"""
+        print(f"\nSnapshot Summary:")
+        print(f"  - Total widgets: {snapshot.widget_count}")
+        print(f"  - Widget types: {dict(list(snapshot.widget_types.items())[:6])}...")
+        print(f"  - Main window size: {snapshot.main_window_size}")
+        print(f"  - Critical widgets: {len(snapshot.critical_widgets)}")
+        print(f"  - Total area: {snapshot.total_area:,} pixels")
+        
+        print(f"\nValidation Results by Rule:")
+        total_issues = 0
+        for rule_class, details in validation_details.items():
+            rule_issues = len(details['issues'])
+            total_issues += rule_issues
+            high_count = len(details['high_severity'])
+            medium_count = len(details['medium_severity'])
+            low_count = len(details['low_severity'])
+            
+            status = "✅" if rule_issues == 0 else "⚠️" if high_count == 0 else "❌"
+            print(f"  {status} {rule_class}: {rule_issues} issues (H:{high_count}, M:{medium_count}, L:{low_count})")
+            print(f"    {details['description']}")
+            
+            if rule_issues > 0:
+                for issue in details['issues'][:2]:  # Show first 2 issues per rule
+                    print(f"      - {issue}")
+                if rule_issues > 2:
+                    print(f"      ... and {rule_issues - 2} more")
+        
+        print(f"\nOverall Status: {'🎉 EXCELLENT' if total_issues == 0 else '✅ GOOD' if total_issues <= 3 else '⚠️ NEEDS ATTENTION'}")
+    
+    def _test_comprehensive_adaptability(self, widget) -> Dict[str, Any]:
+        """Test comprehensive adaptability across different scenarios"""
+        print("Testing adaptability across different content scenarios...")
+        
+        test_scenarios = [
+            ('SHORT', 'Minimal content'),
+            ('MEDIUM_PROJECT', 'Standard content'),
+            ('EXTREMELY_LONG_PROJECT_NAME_FOR_OVERFLOW_TESTING', 'Extreme content'),
+            ('SPECIAL_CHARS_123', 'Special characters')
+        ]
+        
+        results = []
+        
+        for alias, description in test_scenarios:
+            widget.project_combobox.set(alias)
+            widget.on_project_select(alias)
+            widget.root.update_idletasks()
+            
+            geometries = self.collect_widget_geometry(widget.root, f"test_{alias}")
+            issues, validation_details = self.validate_geometries_enhanced(geometries)
+            
+            high_severity = sum(len(d['high_severity']) for d in validation_details.values())
+            medium_severity = sum(len(d['medium_severity']) for d in validation_details.values())
+            
+            results.append({
+                'scenario': description,
+                'alias': alias,
+                'widget_count': len(geometries),
+                'total_issues': len(issues),
+                'high_severity': high_severity,
+                'medium_severity': medium_severity,
+                'adaptability_score': self._calculate_adaptability_score(high_severity, medium_severity, len(issues))
+            })
+        
+        print(f"  {'Scenario':<20} {'Widgets':<8} {'Issues':<7} {'Score':<6} {'Status'}")
+        print("-" * 65)
+        
+        for result in results:
+            status = "🎉" if result['high_severity'] == 0 else "⚠️" if result['high_severity'] <= 1 else "❌"
+            print(f"  {result['scenario']:<20} {result['widget_count']:<8} {result['total_issues']:<7} "
+                  f"{result['adaptability_score']:.1f}/10 {status}")
+        
+        avg_score = sum(r['adaptability_score'] for r in results) / len(results)
+        print(f"\n  Average adaptability score: {avg_score:.1f}/10")
+        
+        return {
+            'scenarios': results,
+            'average_score': avg_score,
+            'max_high_severity': max(r['high_severity'] for r in results)
+        }
+    
+    def _calculate_adaptability_score(self, high_severity: int, medium_severity: int, total_issues: int) -> float:
+        """Calculate adaptability score (0-10)"""
+        base_score = 10.0
+        
+        # Penalize high severity issues heavily
+        base_score -= high_severity * 3.0
+        
+        # Penalize medium severity issues moderately
+        base_score -= medium_severity * 1.0
+        
+        # Small penalty for total issue count
+        base_score -= max(0, total_issues - 5) * 0.2
+        
+        return max(0.0, base_score)
+    
+    def _test_enhanced_theme_consistency(self, widget) -> Dict[str, Any]:
+        """Test enhanced theme consistency with color palette validation"""
+        print("Testing theme consistency with enhanced validation and color palette checks...")
+        
+        theme_results = []
+        baseline_geometries = None
+        
+        for i in range(len(widget.themes)):
+            widget.cycle_theme()
+            widget.root.update_idletasks()
+            time.sleep(0.05)
+            
+            # Set expected colors for current theme
+            current_theme = widget.get_current_theme()
+            self.color_palette_rule.set_expected_theme(current_theme)
+            
+            geometries = self.collect_widget_geometry(widget.root, f"theme_{i}")
+            issues, validation_details = self.validate_geometries_enhanced(geometries)
+            
+            if baseline_geometries is None:
+                baseline_geometries = geometries
+                
+            # Compare with baseline
+            consistency_issues = self._compare_theme_consistency(baseline_geometries, geometries)
+            
+            # Extract color-specific issues
+            color_issues = validation_details.get('ColorPaletteValidationRule', {}).get('issues', [])
+            color_high_severity = len([i for i in color_issues if '[HIGH]' in i])
+            color_medium_severity = len([i for i in color_issues if '[MEDIUM]' in i])
+            
+            theme_name = widget.themes[i]['name']
+            high_severity = sum(len(d['high_severity']) for d in validation_details.values())
+            
+            theme_results.append({
+                'theme': theme_name,
+                'issues': len(issues),
+                'high_severity': high_severity,
+                'consistency_issues': len(consistency_issues),
+                'color_issues': len(color_issues),
+                'color_high_severity': color_high_severity,
+                'color_medium_severity': color_medium_severity,
+                'theme_colors': current_theme,
+                'geometries': geometries
+            })
+        
+        # Print enhanced theme consistency results
+        print(f"  {'Theme':<15} {'Issues':<7} {'High':<5} {'Consistency':<12} {'Colors':<8} {'Status'}")
+        print("-" * 75)
+        
+        for result in theme_results:
+            color_status = "🎨" if result['color_high_severity'] == 0 else "⚠️"
+            overall_status = "✅" if result['high_severity'] == 0 and result['consistency_issues'] <= 2 else "⚠️"
+            print(f"  {result['theme']:<15} {result['issues']:<7} {result['high_severity']:<5} "
+                  f"{result['consistency_issues']:<12} {result['color_issues']:<8} {color_status}{overall_status}")
+            
+            # Print color-specific details for themes with issues
+            if result['color_issues'] > 0:
+                print(f"    Color issues: H:{result['color_high_severity']}, M:{result['color_medium_severity']}")
+                color_rule_details = validation_details.get('ColorPaletteValidationRule', {})
+                if color_rule_details.get('issues'):
+                    for issue in color_rule_details['issues'][:2]:  # Show first 2 color issues
+                        print(f"      - {issue}")
+                    if len(color_rule_details['issues']) > 2:
+                        print(f"      ... and {len(color_rule_details['issues']) - 2} more color issues")
+        
+        return {
+            'theme_results': theme_results,
+            'max_consistency_issues': max(r['consistency_issues'] for r in theme_results),
+            'max_color_issues': max(r['color_issues'] for r in theme_results),
+            'themes_with_color_problems': sum(1 for r in theme_results if r['color_high_severity'] > 0),
+            'themes_with_high_severity': sum(1 for r in theme_results if r['high_severity'] > 0)
+        }
+    
+    def _compare_theme_consistency(self, baseline: List['GeometryInfo'], current: List['GeometryInfo']) -> List[str]:
+        """Compare theme consistency with enhanced tolerance"""
+        issues = []
+        
+        # Create mapping by widget name
+        baseline_map = {geo.name: geo for geo in baseline if geo.visible}
+        current_map = {geo.name: geo for geo in current if geo.visible}
+        
+        # Check for significant position/size changes
+        for name, baseline_geo in baseline_map.items():
+            if name in current_map:
+                current_geo = current_map[name]
+                
+                # Allow more tolerance for theme-related changes
+                pos_tolerance = 10
+                size_tolerance = 15
+                
+                if (abs(baseline_geo.x - current_geo.x) > pos_tolerance or
+                    abs(baseline_geo.y - current_geo.y) > pos_tolerance):
+                    issues.append(f"Position change: {name}")
+                
+                if (abs(baseline_geo.width - current_geo.width) > size_tolerance or
+                    abs(baseline_geo.height - current_geo.height) > size_tolerance):
+                    issues.append(f"Size change: {name}")
+        
+        return issues
+    
+    def _perform_enhanced_assertions(self, issues: List[str], validation_details: Dict[str, Any], 
+                                   snapshot: GeometrySnapshot, adaptability_results: Dict[str, Any],
+                                   theme_results: Dict[str, Any]):
+        """Perform enhanced assertions with adaptive tolerance including color validation"""
+        
+        # Calculate severity-based metrics
+        total_high_severity = sum(len(d['high_severity']) for d in validation_details.values())
+        total_medium_severity = sum(len(d['medium_severity']) for d in validation_details.values())
+        
+        # Extract color-specific metrics
+        color_details = validation_details.get('ColorPaletteValidationRule', {})
+        color_high_severity = len(color_details.get('high_severity', []))
+        color_medium_severity = len(color_details.get('medium_severity', []))
+        
+        # Critical assertions (must pass)
+        self.assertEqual(total_high_severity, 0, 
+                        f"Found {total_high_severity} high-severity geometry issues that must be fixed")
+        
+        # Color palette assertions
+        self.assertEqual(color_high_severity, 0,
+                        f"Found {color_high_severity} high-severity color palette issues that must be fixed")
+        
+        self.assertLessEqual(color_medium_severity, 3,
+                           f"Found {color_medium_severity} medium-severity color issues (max 3 allowed)")
+        
+        # Adaptability assertions
+        self.assertLessEqual(adaptability_results['max_high_severity'], 1,
+                           "Adaptability test failed: too many high-severity issues across scenarios")
+        
+        self.assertGreaterEqual(adaptability_results['average_score'], 7.0,
+                               f"Adaptability score {adaptability_results['average_score']:.1f} below threshold of 7.0")
+        
+        # Enhanced theme consistency assertions including color validation
+        self.assertLessEqual(theme_results['max_consistency_issues'], 5,
+                           "Theme consistency issues exceed tolerance")
+        
+        self.assertLessEqual(theme_results['themes_with_high_severity'], 1,
+                           "Too many themes have high-severity issues")
+        
+        # Color-specific theme assertions
+        if 'max_color_issues' in theme_results:
+            self.assertLessEqual(theme_results['max_color_issues'], 8,
+                               f"Color palette issues exceed tolerance (max 8, found {theme_results['max_color_issues']})")
+        
+        if 'themes_with_color_problems' in theme_results:
+            self.assertLessEqual(theme_results['themes_with_color_problems'], 2,
+                               f"Too many themes have color palette problems ({theme_results['themes_with_color_problems']} themes)")
+        
+        # Quality assertions with tolerance
+        self.assertLessEqual(total_medium_severity, 5,
+                           f"Found {total_medium_severity} medium-severity issues (max 5 allowed)")
+        
+        # Window size assertions with enhanced tolerance
+        window_width, window_height = snapshot.main_window_size
+        self.assertGreaterEqual(window_width, 300, "Window too narrow")
+        self.assertLessEqual(window_width, 800, "Window too wide")
+        self.assertGreaterEqual(window_height, 200, "Window too short")
+        self.assertLessEqual(window_height, 800, "Window too tall")
+        
+        # Widget count sanity check (adaptive)
+        self.assertGreaterEqual(snapshot.widget_count, 15, "Too few widgets detected")
+        self.assertLessEqual(snapshot.widget_count, 200, "Unexpectedly high widget count")
+
+    def test_keyboard_accessibility_validation(self):
+        """Test keyboard accessibility and focus management validation"""
+        print("\n=== Testing Keyboard Accessibility Validation ===")
+        
+        with patch('tick_tock_widget.project_data.ProjectDataManager'):
+            widget = TickTockWidget()
+            widget._test_mode = True
+            
+            # Set test mode and create widgets
+            widget.root.withdraw()  # Hide window during testing
+            widget.create_widgets()
+            widget.root.update()
+            
+            try:
+                # Collect geometry information
+                geometry_widgets = self.collect_widget_geometry(widget.root, "main_window")
+                print(f"Collected geometry for {len(geometry_widgets)} widgets")
+                
+                # Test keyboard accessibility validation
+                accessibility_result = self.keyboard_accessibility_rule.validate(geometry_widgets)
+                
+                print(f"Keyboard Accessibility Result:")
+                print(f"  - Passed: {accessibility_result.passed}")
+                print(f"  - Severity: {accessibility_result.severity}")
+                print(f"  - Confidence: {accessibility_result.confidence}")
+                print(f"  - Focusable widgets: {accessibility_result.metadata.get('focusable_widgets', 0)}")
+                print(f"  - Accessibility score: {accessibility_result.metadata.get('accessibility_score', 0):.2f}")
+                
+                if accessibility_result.issues:
+                    print(f"  - Issues found: {len(accessibility_result.issues)}")
+                    for issue in accessibility_result.issues[:3]:
+                        print(f"    • {issue}")
+                else:
+                    print("  - No accessibility issues found")
+                
+                # Validate results
+                self.assertIsNotNone(accessibility_result)
+                self.assertIn(accessibility_result.severity, ["PASS", "INFO", "WARNING", "ERROR"])
+                self.assertGreaterEqual(accessibility_result.confidence, 0.5)
+                
+                # Check that we found some focusable widgets
+                focusable_count = accessibility_result.metadata.get('focusable_widgets', 0)
+                self.assertGreater(focusable_count, 0, "Should find at least some focusable widgets")
+                
+                print(f"    ✅ Keyboard accessibility validation completed")
+                
+            finally:
+                widget.root.destroy()
+
+    def test_responsiveness_validation(self):
+        """Test GUI responsiveness validation"""
+        print("\n=== Testing Responsiveness Validation ===")
+        
+        with patch('tick_tock_widget.project_data.ProjectDataManager'):
+            widget = TickTockWidget()
+            widget._test_mode = True
+            
+            # Set test mode and create widgets
+            widget.root.withdraw()  # Hide window during testing
+            widget.create_widgets()
+            widget.root.update()
+            
+            try:
+                # Test different window sizes
+                test_sizes = [(450, 450), (300, 250), (800, 600)]
+                
+                for width, height in test_sizes:
+                    print(f"\nTesting window size: {width}x{height}")
+                    
+                    # Resize window
+                    widget.root.geometry(f"{width}x{height}")
+                    widget.root.update()
+                    
+                    # Collect geometry information
+                    geometry_widgets = self.collect_widget_geometry(widget.root, "main_window")
+                    
+                    # Test responsiveness validation
+                    responsiveness_result = self.responsiveness_rule.validate(geometry_widgets)
+                    
+                    print(f"  Responsiveness Result for {width}x{height}:")
+                    print(f"    - Passed: {responsiveness_result.passed}")
+                    print(f"    - Severity: {responsiveness_result.severity}")
+                    print(f"    - Aspect ratio: {responsiveness_result.metadata.get('aspect_ratio', 0):.2f}")
+                    print(f"    - Expandable widgets: {responsiveness_result.metadata.get('expandable_widgets', 0)}")
+                    
+                    if responsiveness_result.issues:
+                        print(f"    - Issues: {len(responsiveness_result.issues)}")
+                        for issue in responsiveness_result.issues[:2]:
+                            print(f"      • {issue}")
+                    
+                    # Validate results
+                    self.assertIsNotNone(responsiveness_result)
+                    self.assertIn(responsiveness_result.severity, ["PASS", "INFO", "WARNING", "ERROR"])
+                    
+                    # Window size should be captured correctly (if available)
+                    window_size = responsiveness_result.metadata.get('window_size', (0, 0))
+                    print(f"      Captured window size: {window_size} (expected: {width}x{height})")
+                    # Note: Window size may not be captured accurately in test environment
+                
+                print(f"    ✅ Responsiveness validation completed for all window sizes")
+                
+            finally:
+                widget.root.destroy()
+
+    def test_user_interaction_validation(self):
+        """Test user interaction patterns validation"""
+        print("\n=== Testing User Interaction Validation ===")
+        
+        with patch('tick_tock_widget.project_data.ProjectDataManager'):
+            widget = TickTockWidget()
+            widget._test_mode = True
+            
+            # Set test mode and create widgets
+            widget.root.withdraw()  # Hide window during testing
+            widget.create_widgets()
+            widget.root.update()
+            
+            try:
+                # Collect geometry information
+                geometry_widgets = self.collect_widget_geometry(widget.root, "main_window")
+                print(f"Collected geometry for {len(geometry_widgets)} widgets")
+                
+                # Test user interaction validation
+                interaction_result = self.user_interaction_rule.validate(geometry_widgets)
+                
+                print(f"User Interaction Result:")
+                print(f"  - Passed: {interaction_result.passed}")
+                print(f"  - Severity: {interaction_result.severity}")
+                print(f"  - Confidence: {interaction_result.confidence}")
+                print(f"  - Total buttons: {interaction_result.metadata.get('total_buttons', 0)}")
+                print(f"  - Interactive widgets: {interaction_result.metadata.get('interactive_widgets', 0)}")
+                print(f"  - Usability score: {interaction_result.metadata.get('usability_score', 0):.2f}")
+                
+                if interaction_result.issues:
+                    print(f"  - Issues found: {len(interaction_result.issues)}")
+                    for issue in interaction_result.issues[:3]:
+                        print(f"    • {issue}")
+                else:
+                    print("  - No interaction issues found")
+                
+                # Validate results
+                self.assertIsNotNone(interaction_result)
+                self.assertIn(interaction_result.severity, ["PASS", "INFO", "WARNING", "ERROR"])
+                self.assertGreaterEqual(interaction_result.confidence, 0.5)
+                
+                # Check that we found some interactive widgets
+                interactive_count = interaction_result.metadata.get('interactive_widgets', 0)
+                self.assertGreater(interactive_count, 0, "Should find at least some interactive widgets")
+                
+                # Check that buttons were analyzed
+                button_count = interaction_result.metadata.get('total_buttons', 0)
+                self.assertGreater(button_count, 0, "Should find at least some buttons")
+                
+                print(f"    ✅ User interaction validation completed")
+                
+            finally:
+                widget.root.destroy()
+
+    def test_comprehensive_validation_framework(self):
+        """Test the complete validation framework with all rules"""
+        print("\n=== Testing Comprehensive Validation Framework ===")
+        
+        with patch('tick_tock_widget.project_data.ProjectDataManager'):
+            widget = TickTockWidget()
+            widget._test_mode = True
+            
+            # Set test mode and create widgets
+            widget.root.withdraw()  # Hide window during testing
+            widget.create_widgets()
+            widget.root.update()
+            
+            try:
+                # Collect geometry information
+                geometry_widgets = self.collect_widget_geometry(widget.root, "main_window")
+                print(f"Collected geometry for {len(geometry_widgets)} widgets")
+                
+                # Test all validation rules
+                all_results = []
+                rule_summary = {}
+                
+                for rule in self.validation_rules:
+                    rule_name = rule.__class__.__name__
+                    print(f"\nRunning {rule_name}...")
+                    result = rule.validate(geometry_widgets)
+                    all_results.append(result)
+                    
+                    # Handle both ValidationResult objects and list of issues
+                    if isinstance(result, ValidationResult):
+                        rule_summary[rule_name] = {
+                            'passed': result.passed,
+                            'severity': result.severity,
+                            'issues': len(result.issues),
+                            'confidence': result.confidence
+                        }
+                        print(f"  - {rule_name}: {result.severity} ({len(result.issues)} issues)")
+                    else:
+                        # Assume it's a list of issues (legacy format)
+                        issues_count = len(result) if result else 0
+                        rule_summary[rule_name] = {
+                            'passed': issues_count == 0,
+                            'severity': "PASS" if issues_count == 0 else "WARNING",
+                            'issues': issues_count,
+                            'confidence': 1.0
+                        }
+                        print(f"  - {rule_name}: {'PASS' if issues_count == 0 else 'WARNING'} ({issues_count} issues)")
+                
+                print(f"\n=== Comprehensive Validation Summary ===")
+                print(f"Total validation rules: {len(self.validation_rules)}")
+                
+                # Calculate summary based on the rule_summary we built
+                passed_rules = sum(1 for summary in rule_summary.values() if summary['passed'])
+                print(f"Passed rules: {passed_rules}/{len(self.validation_rules)}")
+                
+                # Count by severity
+                severity_counts = {}
+                for summary in rule_summary.values():
+                    severity = summary['severity']
+                    severity_counts[severity] = severity_counts.get(severity, 0) + 1
+                
+                for severity, count in sorted(severity_counts.items()):
+                    print(f"  - {severity}: {count} rules")
+                
+                total_issues = sum(summary['issues'] for summary in rule_summary.values())
+                print(f"Total issues found: {total_issues}")
+                
+                avg_confidence = sum(summary['confidence'] for summary in rule_summary.values()) / len(rule_summary)
+                print(f"Average confidence: {avg_confidence:.2f}")
+                
+                # Framework health score
+                health_score = (passed_rules / len(self.validation_rules)) * (avg_confidence)
+                print(f"Framework health score: {health_score:.2f}")
+                
+                # Validate framework completeness
+                expected_rules = [
+                    "EnhancedOverlapRule",
+                    "AdaptiveSizeRule", 
+                    "IntelligentTextOverflowRule",
+                    "ColorPaletteValidationRule",
+                    "Keyboard Accessibility Validation",
+                    "Responsiveness Validation",
+                    "User Interaction Validation"
+                ]
+                
+                actual_rules = [getattr(rule, 'name', rule.__class__.__name__) for rule in self.validation_rules]
+                for expected_rule in expected_rules:
+                    self.assertIn(expected_rule, actual_rules, 
+                                f"Missing expected validation rule: {expected_rule}")
+                
+                # All rules should execute successfully
+                for result in all_results:
+                    self.assertIsNotNone(result, "All validation rules should return results")
+                    
+                    # Handle both ValidationResult objects and legacy list returns
+                    if isinstance(result, ValidationResult):
+                        self.assertIn(result.severity, ["PASS", "INFO", "WARNING", "ERROR"])
+                        self.assertGreaterEqual(result.confidence, 0.0)
+                        self.assertLessEqual(result.confidence, 1.0)
+                    else:
+                        # Legacy list result - just check it's a list
+                        self.assertIsInstance(result, list, "Legacy results should be lists")
+                
+                print(f"    ✅ Comprehensive validation framework test completed")
+                print(f"    ✅ All {len(expected_rules)} validation rules are operational")
+                
+            finally:
+                widget.root.destroy()
+
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)

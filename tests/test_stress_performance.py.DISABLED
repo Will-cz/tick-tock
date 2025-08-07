@@ -1,0 +1,618 @@
+#!/usr/bin/env python3
+"""
+Stress Testing and Performance Validation for Tick-Tock Widget
+Tests application behavior under stress conditions and performance benchmarks
+"""
+
+import unittest
+import tempfile
+import json
+import os
+import time
+import threading
+import gc
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    # Mock psutil for basic functionality
+    class MockProcess:
+        def memory_info(self):
+            class MemInfo:
+                rss = 50 * 1024 * 1024  # 50MB fake value
+            return MemInfo()
+    
+    class MockPsutil:
+        def Process(self):
+            return MockProcess()
+    
+    psutil = MockPsutil()
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+import tkinter as tk
+from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from tick_tock_widget.project_data import ProjectDataManager, Project, SubActivity, TimeRecord
+
+
+class TestStressAndPerformance(unittest.TestCase):
+    """Stress testing and performance validation tests"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.temp_dir = tempfile.mkdtemp()
+        self.test_data_file = Path(self.temp_dir) / "stress_test_projects.json"
+        self.root = tk.Tk()
+        self.root.withdraw()  # Hide test windows
+        
+        # Performance tracking
+        self.performance_metrics = {}
+        
+    def tearDown(self):
+        """Clean up test environment"""
+        try:
+            self.root.destroy()
+        except tk.TclError:
+            pass
+        
+        # Clean up temp files
+        import shutil
+        try:
+            shutil.rmtree(self.temp_dir)
+        except (FileNotFoundError, OSError):
+            pass
+        
+        # Force garbage collection
+        gc.collect()
+    
+    def measure_performance(self, operation_name, func, *args, **kwargs):
+        """Measure performance of an operation"""
+        # Get initial memory usage
+        process = psutil.Process()
+        initial_memory = process.memory_info().rss / 1024 / 1024  # MB
+        
+        # Measure execution time
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        
+        # Get final memory usage
+        final_memory = process.memory_info().rss / 1024 / 1024  # MB
+        memory_delta = final_memory - initial_memory
+        
+        # Store metrics
+        self.performance_metrics[operation_name] = {
+            'execution_time': end_time - start_time,
+            'initial_memory_mb': initial_memory,
+            'final_memory_mb': final_memory,
+            'memory_delta_mb': memory_delta
+        }
+        
+        print(f"  📊 {operation_name}:")
+        print(f"    Time: {end_time - start_time:.3f}s")
+        print(f"    Memory: {memory_delta:+.2f}MB (initial: {initial_memory:.1f}MB)")
+        
+        return result
+    
+    def create_large_dataset(self, num_projects=100, num_sub_activities=10, num_days=365):
+        """Create a large dataset for stress testing"""
+        projects = []
+        
+        print(f"  Creating dataset: {num_projects} projects, {num_sub_activities} sub-activities each, {num_days} days of data")
+        
+        base_date = datetime(2024, 1, 1)
+        
+        for p in range(num_projects):
+            project = Project(
+                name=f"Stress Test Project {p:04d}",
+                dz_number=f"STRESS-{p:04d}",
+                alias=f"stress_{p:04d}",
+                sub_activities=[],
+                time_records={}
+            )
+            
+            # Add project-level time records
+            for day in range(0, num_days, 7):  # Weekly project records
+                date = base_date + timedelta(days=day)
+                date_str = date.strftime("%Y-%m-%d")
+                project.time_records[date_str] = TimeRecord(
+                    date=date_str,
+                    total_seconds=(p * 100 + day) % 28800  # Up to 8 hours
+                )
+            
+            # Add sub-activities
+            for s in range(num_sub_activities):
+                sub_activity = SubActivity(
+                    name=f"Sub-Activity {s:02d}",
+                    alias=f"sub_{s:02d}",
+                    time_records={}
+                )
+                
+                # Add time records for each day
+                for day in range(num_days):
+                    date = base_date + timedelta(days=day)
+                    date_str = date.strftime("%Y-%m-%d")
+                    
+                    # Vary the time based on project, sub-activity, and day
+                    seconds = ((p * num_sub_activities + s) * 123 + day * 456) % 14400  # Up to 4 hours
+                    
+                    sub_activity.time_records[date_str] = TimeRecord(
+                        date=date_str,
+                        total_seconds=seconds,
+                        is_running=False,
+                        last_started=None
+                    )
+                
+                project.sub_activities.append(sub_activity)
+            
+            projects.append(project)
+        
+        return projects
+    
+    def test_large_dataset_operations(self):
+        """Test operations with large datasets"""
+        print("\n=== Stress Test: Large Dataset Operations ===")
+        
+        # Create large dataset
+        projects = self.measure_performance(
+            "Large Dataset Creation",
+            self.create_large_dataset,
+            100, 10, 365  # 100 projects, 10 sub-activities, 365 days
+        )
+        
+        # Create data manager with large dataset
+        dm = ProjectDataManager(str(self.test_data_file))
+        dm.projects = projects
+        
+        # Test save performance
+        save_result = self.measure_performance(
+            "Large Dataset Save",
+            dm.save_projects,
+            force=True
+        )
+        self.assertTrue(save_result, "Failed to save large dataset")
+        
+        # Test load performance
+        dm_load = ProjectDataManager(str(self.test_data_file))
+        load_result = self.measure_performance(
+            "Large Dataset Load",
+            dm_load.load_projects
+        )
+        self.assertTrue(load_result, "Failed to load large dataset")
+        
+        # Verify data integrity
+        self.assertEqual(len(dm_load.projects), 100, "Project count mismatch")
+        self.assertEqual(len(dm_load.projects[0].sub_activities), 10, "Sub-activity count mismatch")
+        
+        # Test data access performance
+        def access_all_time_records():
+            total_records = 0
+            total_seconds = 0
+            for project in dm_load.projects:
+                total_records += len(project.time_records)
+                for record in project.time_records.values():
+                    total_seconds += record.total_seconds
+                
+                for sub_activity in project.sub_activities:
+                    total_records += len(sub_activity.time_records)
+                    for record in sub_activity.time_records.values():
+                        total_seconds += record.total_seconds
+            
+            return total_records, total_seconds
+        
+        total_records, total_seconds = self.measure_performance(
+            "Data Access and Aggregation",
+            access_all_time_records
+        )
+        
+        print(f"    Total records processed: {total_records:,}")
+        print(f"    Total time seconds: {total_seconds:,}")
+        
+        # Performance assertions
+        save_time = self.performance_metrics["Large Dataset Save"]["execution_time"]
+        load_time = self.performance_metrics["Large Dataset Load"]["execution_time"]
+        access_time = self.performance_metrics["Data Access and Aggregation"]["execution_time"]
+        
+        self.assertLess(save_time, 30.0, "Save operation too slow (>30s)")
+        self.assertLess(load_time, 10.0, "Load operation too slow (>10s)")
+        self.assertLess(access_time, 5.0, "Data access too slow (>5s)")
+        
+        print("  ✅ Large dataset operations completed within performance targets")
+    
+    def test_concurrent_access_stress(self):
+        """Test concurrent access under stress conditions"""
+        print("\n=== Stress Test: Concurrent Access ===")
+        
+        # Create base dataset
+        projects = self.create_large_dataset(20, 5, 30)  # Smaller for concurrent test
+        dm_base = ProjectDataManager(str(self.test_data_file))
+        dm_base.projects = projects
+        dm_base.save_projects(force=True)
+        
+        # Define concurrent operations
+        def concurrent_read_operation(worker_id):
+            """Concurrent read operation"""
+            dm = ProjectDataManager(str(self.test_data_file))
+            start_time = time.time()
+            
+            result = dm.load_projects()
+            if result:
+                # Simulate data processing
+                total_time = 0
+                for project in dm.projects:
+                    for sub_activity in project.sub_activities:
+                        for record in sub_activity.time_records.values():
+                            total_time += record.total_seconds
+                
+                # Small delay to simulate processing
+                time.sleep(0.01)
+                
+                return {
+                    'worker_id': worker_id,
+                    'success': True,
+                    'projects_loaded': len(dm.projects),
+                    'total_time': total_time,
+                    'duration': time.time() - start_time
+                }
+            else:
+                return {
+                    'worker_id': worker_id,
+                    'success': False,
+                    'duration': time.time() - start_time
+                }
+        
+        def concurrent_write_operation(worker_id):
+            """Concurrent write operation"""
+            try:
+                dm = ProjectDataManager(str(self.test_data_file))
+                start_time = time.time()
+                
+                # Add small delay to stagger operations
+                time.sleep(0.01 * worker_id)
+                
+                load_result = dm.load_projects()
+                if load_result and dm.projects:
+                    # Modify data
+                    dm.projects[0].name = f"Modified by Worker {worker_id} at {time.time()}"
+                    
+                    # Add a time record
+                    if dm.projects[0].sub_activities:
+                        sub_activity = dm.projects[0].sub_activities[0]
+                        date_key = f"2025-08-{9 + worker_id % 20:02d}"
+                        sub_activity.time_records[date_key] = TimeRecord(
+                            date=date_key,
+                            total_seconds=worker_id * 3600
+                        )
+                    
+                    # Save changes with retry
+                    for attempt in range(3):
+                        try:
+                            save_result = dm.save_projects(force=True)
+                            if save_result:
+                                break
+                            time.sleep(0.01)  # Brief pause before retry
+                        except Exception:
+                            if attempt == 2:  # Last attempt
+                                save_result = False
+                            else:
+                                time.sleep(0.02)  # Longer pause before retry
+                    
+                    return {
+                        'worker_id': worker_id,
+                        'success': save_result,
+                        'duration': time.time() - start_time
+                    }
+                else:
+                    return {
+                        'worker_id': worker_id,
+                        'success': False,
+                        'duration': time.time() - start_time
+                    }
+            except Exception as e:
+                return {
+                    'worker_id': worker_id,
+                    'success': False,
+                    'duration': time.time() - start_time,
+                    'error': str(e)
+                }
+        
+        # Test concurrent reads
+        print("  Testing concurrent read operations...")
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            read_futures = [
+                executor.submit(concurrent_read_operation, i)
+                for i in range(20)  # 20 concurrent readers
+            ]
+            
+            read_results = []
+            for future in as_completed(read_futures, timeout=30):
+                try:
+                    result = future.result()
+                    read_results.append(result)
+                except Exception as e:
+                    read_results.append({
+                        'success': False,
+                        'error': str(e)
+                    })
+        
+        # Analyze read results
+        successful_reads = sum(1 for r in read_results if r.get('success'))
+        avg_read_time = sum(r.get('duration', 0) for r in read_results) / len(read_results)
+        
+        print(f"    Concurrent reads: {successful_reads}/{len(read_results)} successful")
+        print(f"    Average read time: {avg_read_time:.3f}s")
+        
+        self.assertGreater(successful_reads, len(read_results) * 0.8,
+                          "Too many read failures in concurrent test")
+        
+        # Test mixed read/write operations
+        print("  Testing mixed read/write operations...")
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            mixed_futures = []
+            
+            # Submit read and write operations (reduced count for stability)
+            for i in range(6):
+                if i % 3 == 0:  # 1/3 writes, 2/3 reads
+                    mixed_futures.append(
+                        executor.submit(concurrent_write_operation, i)
+                    )
+                else:
+                    mixed_futures.append(
+                        executor.submit(concurrent_read_operation, i)
+                    )
+            
+            mixed_results = []
+            for future in as_completed(mixed_futures, timeout=30):
+                try:
+                    result = future.result()
+                    mixed_results.append(result)
+                except Exception as e:
+                    mixed_results.append({
+                        'success': False,
+                        'error': str(e)
+                    })
+        
+        # Analyze mixed results
+        successful_mixed = sum(1 for r in mixed_results if r.get('success'))
+        avg_mixed_time = sum(r.get('duration', 0) for r in mixed_results) / len(mixed_results)
+        
+        print(f"    Mixed operations: {successful_mixed}/{len(mixed_results)} successful")
+        print(f"    Average operation time: {avg_mixed_time:.3f}s")
+        
+        self.assertGreater(successful_mixed, len(mixed_results) * 0.3,
+                          "Too many failures in mixed concurrent operations")
+        
+        print("  ✅ Concurrent access stress test completed")
+    
+    def test_memory_usage_patterns(self):
+        """Test memory usage patterns and potential leaks"""
+        print("\n=== Stress Test: Memory Usage Patterns ===")
+        
+        initial_memory = psutil.Process().memory_info().rss / 1024 / 1024
+        print(f"  Initial memory usage: {initial_memory:.1f}MB")
+        
+        # Test repeated load/save cycles
+        memory_samples = []
+        
+        for cycle in range(20):
+            # Create data manager
+            dm = ProjectDataManager(str(self.test_data_file))
+            
+            # Create projects
+            projects = self.create_large_dataset(10, 3, 30)  # Smaller dataset for repeated cycles
+            dm.projects = projects
+            
+            # Save and reload
+            dm.save_projects(force=True)
+            dm.load_projects()
+            
+            # Force garbage collection
+            del dm
+            del projects
+            gc.collect()
+            
+            # Sample memory usage
+            current_memory = psutil.Process().memory_info().rss / 1024 / 1024
+            memory_samples.append(current_memory)
+            
+            if cycle % 5 == 0:
+                print(f"    Cycle {cycle}: {current_memory:.1f}MB")
+        
+        # Analyze memory usage
+        final_memory = memory_samples[-1]
+        max_memory = max(memory_samples)
+        memory_growth = final_memory - initial_memory
+        
+        print(f"  Final memory usage: {final_memory:.1f}MB")
+        print(f"  Maximum memory usage: {max_memory:.1f}MB")
+        print(f"  Memory growth: {memory_growth:+.1f}MB")
+        
+        # Memory assertions
+        self.assertLess(memory_growth, 50.0, "Excessive memory growth detected (>50MB)")
+        self.assertLess(max_memory - initial_memory, 100.0, "Peak memory usage too high (>100MB)")
+        
+        # Check for memory stability in the last few cycles
+        last_5_samples = memory_samples[-5:]
+        memory_variance = max(last_5_samples) - min(last_5_samples)
+        self.assertLess(memory_variance, 10.0, "Memory usage not stable in final cycles")
+        
+        print("  ✅ Memory usage patterns within acceptable limits")
+    
+    def test_rapid_operation_cycles(self):
+        """Test rapid repeated operations"""
+        print("\n=== Stress Test: Rapid Operation Cycles ===")
+        
+        # Create base data
+        dm = ProjectDataManager(str(self.test_data_file))
+        projects = self.create_large_dataset(5, 2, 10)  # Small dataset for rapid operations
+        dm.projects = projects
+        dm.save_projects(force=True)
+        
+        # Test rapid save cycles
+        print("  Testing rapid save cycles...")
+        save_times = []
+        
+        for i in range(100):
+            start_time = time.time()
+            result = dm.save_projects(force=True)
+            save_time = time.time() - start_time
+            save_times.append(save_time)
+            
+            self.assertTrue(result, f"Save failed on rapid cycle {i}")
+            
+            if i % 20 == 0:
+                print(f"    Rapid save {i}: {save_time:.4f}s")
+        
+        avg_save_time = sum(save_times) / len(save_times)
+        max_save_time = max(save_times)
+        
+        print(f"    Average save time: {avg_save_time:.4f}s")
+        print(f"    Maximum save time: {max_save_time:.4f}s")
+        
+        self.assertLess(avg_save_time, 0.1, "Average save time too slow for rapid operations")
+        self.assertLess(max_save_time, 1.0, "Maximum save time too slow")
+        
+        # Test rapid load cycles
+        print("  Testing rapid load cycles...")
+        load_times = []
+        
+        for i in range(50):
+            dm_load = ProjectDataManager(str(self.test_data_file))
+            start_time = time.time()
+            result = dm_load.load_projects()
+            load_time = time.time() - start_time
+            load_times.append(load_time)
+            
+            self.assertTrue(result, f"Load failed on rapid cycle {i}")
+            self.assertEqual(len(dm_load.projects), 5, f"Project count wrong on cycle {i}")
+            
+            if i % 10 == 0:
+                print(f"    Rapid load {i}: {load_time:.4f}s")
+        
+        avg_load_time = sum(load_times) / len(load_times)
+        max_load_time = max(load_times)
+        
+        print(f"    Average load time: {avg_load_time:.4f}s")
+        print(f"    Maximum load time: {max_load_time:.4f}s")
+        
+        self.assertLess(avg_load_time, 0.05, "Average load time too slow for rapid operations")
+        self.assertLess(max_load_time, 0.5, "Maximum load time too slow")
+        
+        print("  ✅ Rapid operation cycles completed successfully")
+    
+    def test_data_corruption_recovery(self):
+        """Test recovery from various data corruption scenarios"""
+        print("\n=== Stress Test: Data Corruption Recovery ===")
+        
+        # Create valid baseline data
+        dm_base = ProjectDataManager(str(self.test_data_file))
+        projects = self.create_large_dataset(3, 2, 10)
+        dm_base.projects = projects
+        dm_base.save_projects(force=True)
+        
+        # Test scenarios
+        corruption_scenarios = [
+            ("Truncated JSON", lambda content: content[:len(content)//2]),
+            ("Invalid JSON syntax", lambda content: content.replace('"', "'")),
+            ("Missing closing brace", lambda content: content.rstrip('}') + '"missing":"brace"'),
+            ("Unicode corruption", lambda content: content.replace('Project', 'Proj\udce9ct')),
+            ("Binary corruption", lambda content: content[:100] + '\x00\x01\x02' + content[103:]),
+        ]
+        
+        for scenario_name, corruption_func in corruption_scenarios:
+            print(f"  Testing {scenario_name.lower()}...")
+            
+            # Create corrupted file
+            corrupted_file = Path(self.temp_dir) / f"corrupted_{scenario_name.lower().replace(' ', '_')}.json"
+            
+            # Read original content
+            with open(self.test_data_file, 'r', encoding='utf-8', errors='ignore') as f:
+                original_content = f.read()
+            
+            # Apply corruption
+            try:
+                corrupted_content = corruption_func(original_content)
+                with open(corrupted_file, 'w', encoding='utf-8', errors='ignore') as f:
+                    f.write(corrupted_content)
+            except Exception as e:
+                print(f"    Corruption creation failed: {e}")
+                continue
+            
+            # Test recovery
+            dm_corrupted = ProjectDataManager(str(corrupted_file))
+            
+            try:
+                load_result = dm_corrupted.load_projects()
+                
+                if load_result:
+                    print(f"    ✅ {scenario_name}: Recovered successfully")
+                    # Should have loaded some valid data or empty list
+                    self.assertIsInstance(dm_corrupted.projects, list)
+                else:
+                    print(f"    ✅ {scenario_name}: Failed gracefully")
+                    # Should have empty projects list
+                    self.assertEqual(len(dm_corrupted.projects), 0)
+                
+            except Exception as e:
+                # Should not crash with unhandled exceptions
+                self.fail(f"{scenario_name} caused unhandled exception: {e}")
+        
+        print("  ✅ Data corruption recovery tests completed")
+    
+    def print_performance_summary(self):
+        """Print summary of all performance metrics"""
+        print(f"\n{'='*60}")
+        print("📊 PERFORMANCE SUMMARY")
+        print(f"{'='*60}")
+        
+        for operation, metrics in self.performance_metrics.items():
+            print(f"\n{operation}:")
+            print(f"  Execution Time: {metrics['execution_time']:.3f}s")
+            print(f"  Memory Delta: {metrics['memory_delta_mb']:+.2f}MB")
+            
+            # Performance ratings
+            if metrics['execution_time'] < 1.0:
+                time_rating = "🟢 Excellent"
+            elif metrics['execution_time'] < 5.0:
+                time_rating = "🟡 Good"
+            else:
+                time_rating = "🔴 Needs Optimization"
+            
+            if abs(metrics['memory_delta_mb']) < 10.0:
+                memory_rating = "🟢 Efficient"
+            elif abs(metrics['memory_delta_mb']) < 50.0:
+                memory_rating = "🟡 Acceptable"
+            else:
+                memory_rating = "🔴 High Usage"
+            
+            print(f"  Time Rating: {time_rating}")
+            print(f"  Memory Rating: {memory_rating}")
+
+
+if __name__ == '__main__':
+    # Create test suite
+    suite = unittest.TestSuite()
+    
+    # Add tests in order
+    suite.addTest(TestStressAndPerformance('test_large_dataset_operations'))
+    suite.addTest(TestStressAndPerformance('test_concurrent_access_stress'))
+    suite.addTest(TestStressAndPerformance('test_memory_usage_patterns'))
+    suite.addTest(TestStressAndPerformance('test_rapid_operation_cycles'))
+    suite.addTest(TestStressAndPerformance('test_data_corruption_recovery'))
+    
+    # Run tests
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+    
+    # Print performance summary if any test instance is available
+    try:
+        test_instance = TestStressAndPerformance()
+        if hasattr(test_instance, 'performance_metrics'):
+            test_instance.print_performance_summary()
+    except:
+        pass

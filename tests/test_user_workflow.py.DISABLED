@@ -1,0 +1,684 @@
+#!/usr/bin/env python3
+"""
+User Workflow Simulation Tests for Tick-Tock Widget
+Tests realistic user interaction patterns and workflow scenarios
+"""
+
+import unittest
+import tempfile
+import json
+import os
+import time
+import random
+from pathlib import Path
+from unittest.mock import patch, MagicMock, PropertyMock
+import tkinter as tk
+from datetime import datetime, timedelta
+
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from tick_tock_widget.project_data import ProjectDataManager, Project, SubActivity, TimeRecord
+
+
+class TestUserWorkflowSimulation(unittest.TestCase):
+    """User workflow simulation tests"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.temp_dir = tempfile.mkdtemp()
+        self.test_data_file = Path(self.temp_dir) / "workflow_test_projects.json"
+        self.root = tk.Tk()
+        self.root.withdraw()
+        
+        # Create realistic initial data
+        self.create_realistic_initial_data()
+        
+        # Track workflow metrics
+        self.workflow_metrics = {
+            'operations_completed': 0,
+            'errors_encountered': 0,
+            'start_time': time.time()
+        }
+        
+    def tearDown(self):
+        """Clean up test environment"""
+        try:
+            self.root.destroy()
+        except tk.TclError:
+            pass
+        
+        import shutil
+        try:
+            shutil.rmtree(self.temp_dir)
+        except (FileNotFoundError, OSError):
+            pass
+    
+    def create_realistic_initial_data(self):
+        """Create realistic initial project data"""
+        initial_data = {
+            "projects": [
+                {
+                    "name": "Web Application Development",
+                    "dz_number": "WEB-2025-001",
+                    "alias": "webapp",
+                    "sub_activities": [
+                        {
+                            "name": "Frontend Development",
+                            "alias": "frontend",
+                            "time_records": {}
+                        },
+                        {
+                            "name": "Backend API",
+                            "alias": "backend",
+                            "time_records": {}
+                        },
+                        {
+                            "name": "Database Design",
+                            "alias": "database",
+                            "time_records": {}
+                        },
+                        {
+                            "name": "Testing & QA",
+                            "alias": "testing",
+                            "time_records": {}
+                        }
+                    ],
+                    "time_records": {}
+                },
+                {
+                    "name": "Mobile App Project",
+                    "dz_number": "MOB-2025-002",
+                    "alias": "mobile",
+                    "sub_activities": [
+                        {
+                            "name": "UI/UX Design",
+                            "alias": "design",
+                            "time_records": {}
+                        },
+                        {
+                            "name": "Development",
+                            "alias": "dev",
+                            "time_records": {}
+                        },
+                        {
+                            "name": "App Store Submission",
+                            "alias": "store",
+                            "time_records": {}
+                        }
+                    ],
+                    "time_records": {}
+                },
+                {
+                    "name": "Data Analysis Research",
+                    "dz_number": "DATA-2025-003",
+                    "alias": "data",
+                    "sub_activities": [
+                        {
+                            "name": "Data Collection",
+                            "alias": "collection",
+                            "time_records": {}
+                        },
+                        {
+                            "name": "Analysis & Modeling",
+                            "alias": "analysis",
+                            "time_records": {}
+                        },
+                        {
+                            "name": "Report Writing",
+                            "alias": "report",
+                            "time_records": {}
+                        }
+                    ],
+                    "time_records": {}
+                }
+            ],
+            "current_project_alias": None,
+            "current_sub_activity_alias": None
+        }
+        
+        with open(self.test_data_file, 'w', encoding='utf-8') as f:
+            json.dump(initial_data, f, indent=2)
+    
+    def simulate_work_session(self, dm, project_alias, sub_activity_alias, work_duration_minutes):
+        """Simulate a realistic work session"""
+        project = None
+        for p in dm.projects:
+            if p.alias == project_alias:
+                project = p
+                break
+        
+        if not project:
+            return False
+        
+        sub_activity = None
+        for sa in project.sub_activities:
+            if sa.alias == sub_activity_alias:
+                sub_activity = sa
+                break
+        
+        if not sub_activity:
+            return False
+        
+        # Get current date
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        
+        # Ensure time record exists
+        if current_date not in sub_activity.time_records:
+            sub_activity.time_records[current_date] = TimeRecord(
+                date=current_date,
+                total_seconds=0
+            )
+        
+        time_record = sub_activity.time_records[current_date]
+        
+        # Simulate starting work
+        initial_seconds = time_record.total_seconds
+        time_record.is_running = True
+        time_record.last_started = time.time()
+        
+        # Simulate work time (accelerated for testing)
+        work_seconds = work_duration_minutes * 60
+        time.sleep(0.01)  # Brief pause to simulate actual work
+        
+        # Stop work and update total
+        time_record.is_running = False
+        time_record.total_seconds = initial_seconds + work_seconds
+        time_record.last_started = None
+        
+        self.workflow_metrics['operations_completed'] += 1
+        return True
+    
+    def simulate_daily_workflow(self, dm, day_number):
+        """Simulate a typical daily workflow"""
+        print(f"    Day {day_number}: Simulating daily workflow...")
+        
+        # Morning session - Web app frontend work (2-3 hours)
+        morning_work = self.simulate_work_session(dm, "webapp", "frontend", random.randint(120, 180))
+        if not morning_work:
+            self.workflow_metrics['errors_encountered'] += 1
+        
+        # Mid-morning - Database design (1 hour)
+        database_work = self.simulate_work_session(dm, "webapp", "database", 60)
+        if not database_work:
+            self.workflow_metrics['errors_encountered'] += 1
+        
+        # Save progress mid-day
+        save_result = dm.save_projects(force=True)
+        if not save_result:
+            self.workflow_metrics['errors_encountered'] += 1
+        
+        # Afternoon session - Mobile app design (1.5-2.5 hours)
+        afternoon_work = self.simulate_work_session(dm, "mobile", "design", random.randint(90, 150))
+        if not afternoon_work:
+            self.workflow_metrics['errors_encountered'] += 1
+        
+        # Late afternoon - Data analysis (1-2 hours)
+        analysis_work = self.simulate_work_session(dm, "data", "analysis", random.randint(60, 120))
+        if not analysis_work:
+            self.workflow_metrics['errors_encountered'] += 1
+        
+        # End of day save
+        final_save = dm.save_projects(force=True)
+        if not final_save:
+            self.workflow_metrics['errors_encountered'] += 1
+        
+        return True
+    
+    def test_multi_day_workflow_simulation(self):
+        """Test multi-day realistic workflow patterns"""
+        print("\n=== User Workflow: Multi-Day Work Simulation ===")
+        
+        dm = ProjectDataManager(str(self.test_data_file))
+        self.assertTrue(dm.load_projects(), "Failed to load initial data")
+        
+        initial_project_count = len(dm.projects)
+        print(f"  Starting with {initial_project_count} projects")
+        
+        # Simulate 5 working days
+        for day in range(1, 6):
+            self.simulate_daily_workflow(dm, day)
+            
+            # Verify data integrity after each day
+            self.assertEqual(len(dm.projects), initial_project_count,
+                           f"Project count changed on day {day}")
+            
+            # Check that time is being accumulated
+            total_time = 0
+            for project in dm.projects:
+                for sub_activity in project.sub_activities:
+                    for record in sub_activity.time_records.values():
+                        total_time += record.total_seconds
+            
+            self.assertGreater(total_time, 0, f"No time accumulated by day {day}")
+            print(f"    Day {day} completed - Total time: {total_time/3600:.1f} hours")
+        
+        # Final verification
+        final_dm = ProjectDataManager(str(self.test_data_file))
+        self.assertTrue(final_dm.load_projects(), "Failed to reload final data")
+        
+        # Calculate final totals
+        final_total_time = 0
+        projects_with_time = 0
+        
+        for project in final_dm.projects:
+            project_time = 0
+            for sub_activity in project.sub_activities:
+                for record in sub_activity.time_records.values():
+                    project_time += record.total_seconds
+                    final_total_time += record.total_seconds
+            
+            if project_time > 0:
+                projects_with_time += 1
+        
+        print(f"  Final results:")
+        print(f"    Total accumulated time: {final_total_time/3600:.1f} hours")
+        print(f"    Projects with time logged: {projects_with_time}/{len(final_dm.projects)}")
+        print(f"    Operations completed: {self.workflow_metrics['operations_completed']}")
+        print(f"    Errors encountered: {self.workflow_metrics['errors_encountered']}")
+        
+        # Assertions
+        self.assertGreater(final_total_time, 3600 * 30,  # At least 30 hours total
+                          "Insufficient time accumulated over 5 days")
+        self.assertEqual(projects_with_time, 3, "All projects should have time logged")
+        self.assertLess(self.workflow_metrics['errors_encountered'], 
+                       self.workflow_metrics['operations_completed'] * 0.1,
+                       "Too many errors in workflow simulation")
+        
+        print("  ✅ Multi-day workflow simulation completed successfully")
+    
+    def test_project_lifecycle_workflow(self):
+        """Test complete project lifecycle from creation to completion"""
+        print("\n=== User Workflow: Project Lifecycle ===")
+        
+        dm = ProjectDataManager(str(self.test_data_file))
+        self.assertTrue(dm.load_projects(), "Failed to load initial data")
+        
+        # Phase 1: Create new project
+        print("  Phase 1: Creating new project...")
+        new_project = Project(
+            name="Emergency Bug Fix",
+            dz_number="BUG-2025-URGENT",
+            alias="bugfix",
+            sub_activities=[],
+            time_records={}
+        )
+        
+        # Add sub-activities
+        sub_activities = [
+            ("Problem Investigation", "investigate"),
+            ("Code Fix Implementation", "implement"),
+            ("Testing & Verification", "verify"),
+            ("Deployment", "deploy"),
+            ("Documentation", "document")
+        ]
+        
+        for name, alias in sub_activities:
+            sub_activity = SubActivity(name=name, alias=alias, time_records={})
+            new_project.sub_activities.append(sub_activity)
+        
+        dm.projects.append(new_project)
+        save_result = dm.save_projects(force=True)
+        self.assertTrue(save_result, "Failed to save new project")
+        
+        # Phase 2: Work through project phases
+        print("  Phase 2: Working through project phases...")
+        
+        # Investigation phase (4 hours over 2 days)
+        for day_offset in range(2):
+            work_date = (datetime.now() + timedelta(days=day_offset)).strftime("%Y-%m-%d")
+            
+            # Find the investigate sub-activity
+            investigate_sa = None
+            for sa in new_project.sub_activities:
+                if sa.alias == "investigate":
+                    investigate_sa = sa
+                    break
+            
+            self.assertIsNotNone(investigate_sa, "Investigation sub-activity not found")
+            
+            investigate_sa.time_records[work_date] = TimeRecord(
+                date=work_date,
+                total_seconds=2 * 3600  # 2 hours per day
+            )
+        
+        # Implementation phase (8 hours over 3 days)
+        implement_sa = None
+        for sa in new_project.sub_activities:
+            if sa.alias == "implement":
+                implement_sa = sa
+                break
+        
+        self.assertIsNotNone(implement_sa, "Implementation sub-activity not found")
+        
+        for day_offset in range(3):
+            work_date = (datetime.now() + timedelta(days=day_offset + 2)).strftime("%Y-%m-%d")
+            hours = [3, 3, 2][day_offset]  # 3, 3, 2 hours respectively
+            implement_sa.time_records[work_date] = TimeRecord(
+                date=work_date,
+                total_seconds=hours * 3600
+            )
+        
+        # Testing phase (3 hours)
+        verify_sa = None
+        for sa in new_project.sub_activities:
+            if sa.alias == "verify":
+                verify_sa = sa
+                break
+        
+        self.assertIsNotNone(verify_sa, "Verification sub-activity not found")
+        
+        work_date = (datetime.now() + timedelta(days=5)).strftime("%Y-%m-%d")
+        verify_sa.time_records[work_date] = TimeRecord(
+            date=work_date,
+            total_seconds=3 * 3600
+        )
+        
+        # Deployment and documentation (2 hours total)
+        for alias, hours in [("deploy", 1), ("document", 1)]:
+            sa = None
+            for sub_act in new_project.sub_activities:
+                if sub_act.alias == alias:
+                    sa = sub_act
+                    break
+            
+            if sa:
+                work_date = (datetime.now() + timedelta(days=6)).strftime("%Y-%m-%d")
+                sa.time_records[work_date] = TimeRecord(
+                    date=work_date,
+                    total_seconds=hours * 3600
+                )
+        
+        # Save project progress
+        save_result = dm.save_projects(force=True)
+        self.assertTrue(save_result, "Failed to save project progress")
+        
+        # Phase 3: Project analysis and verification
+        print("  Phase 3: Project analysis...")
+        
+        # Calculate total project time
+        total_project_time = 0
+        for sub_activity in new_project.sub_activities:
+            for record in sub_activity.time_records.values():
+                total_project_time += record.total_seconds
+        
+        expected_total = (4 + 8 + 3 + 1 + 1) * 3600  # 17 hours total
+        self.assertEqual(total_project_time, expected_total,
+                        f"Project time mismatch: expected {expected_total/3600}h, got {total_project_time/3600}h")
+        
+        # Verify all phases have time logged
+        phases_with_time = 0
+        for sub_activity in new_project.sub_activities:
+            if sub_activity.time_records:
+                phases_with_time += 1
+        
+        self.assertEqual(phases_with_time, 5, "All 5 project phases should have time logged")
+        
+        print(f"    Project completed with {total_project_time/3600:.1f} hours logged")
+        print(f"    All {phases_with_time} phases completed")
+        
+        print("  ✅ Project lifecycle workflow completed successfully")
+    
+    def test_context_switching_workflow(self):
+        """Test realistic context switching between projects"""
+        print("\n=== User Workflow: Context Switching ===")
+        
+        dm = ProjectDataManager(str(self.test_data_file))
+        self.assertTrue(dm.load_projects(), "Failed to load initial data")
+        
+        # Simulate a day with frequent context switching
+        print("  Simulating frequent context switching...")
+        
+        # Define work sessions (project, sub_activity, duration_minutes)
+        work_sessions = [
+            ("webapp", "frontend", 45),      # Morning: Web app work
+            ("mobile", "design", 30),        # Quick mobile design check
+            ("webapp", "frontend", 60),      # Back to web app
+            ("data", "collection", 25),      # Brief data collection
+            ("webapp", "backend", 90),       # Lunch break, then backend work
+            ("mobile", "dev", 40),           # Mobile development
+            ("data", "analysis", 50),        # Data analysis
+            ("webapp", "testing", 35),       # Web app testing
+            ("mobile", "design", 20),        # Final mobile design tweaks
+            ("data", "report", 45),          # End day with report writing
+        ]
+        
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        session_count = 0
+        successful_sessions = 0
+        
+        for project_alias, sub_activity_alias, duration in work_sessions:
+            session_count += 1
+            print(f"    Session {session_count}: {project_alias}/{sub_activity_alias} ({duration}min)")
+            
+            # Find project and sub-activity
+            project = None
+            for p in dm.projects:
+                if p.alias == project_alias:
+                    project = p
+                    break
+            
+            if not project:
+                print(f"      ❌ Project '{project_alias}' not found")
+                continue
+            
+            sub_activity = None
+            for sa in project.sub_activities:
+                if sa.alias == sub_activity_alias:
+                    sub_activity = sa
+                    break
+            
+            if not sub_activity:
+                print(f"      ❌ Sub-activity '{sub_activity_alias}' not found")
+                continue
+            
+            # Log time for this session
+            if current_date not in sub_activity.time_records:
+                sub_activity.time_records[current_date] = TimeRecord(
+                    date=current_date,
+                    total_seconds=0
+                )
+            
+            time_record = sub_activity.time_records[current_date]
+            time_record.total_seconds += duration * 60  # Convert to seconds
+            
+            successful_sessions += 1
+            
+            # Simulate brief save every few sessions
+            if session_count % 3 == 0:
+                save_result = dm.save_projects(force=True)
+                if not save_result:
+                    print(f"      ⚠️ Save failed after session {session_count}")
+        
+        # Final save
+        final_save = dm.save_projects(force=True)
+        self.assertTrue(final_save, "Final save failed")
+        
+        # Analyze context switching results
+        print(f"  Context switching analysis:")
+        print(f"    Total sessions: {session_count}")
+        print(f"    Successful sessions: {successful_sessions}")
+        print(f"    Success rate: {successful_sessions/session_count*100:.1f}%")
+        
+        # Verify time distribution
+        project_times = {}
+        for project in dm.projects:
+            project_time = 0
+            for sub_activity in project.sub_activities:
+                if current_date in sub_activity.time_records:
+                    project_time += sub_activity.time_records[current_date].total_seconds
+            
+            if project_time > 0:
+                project_times[project.alias] = project_time / 3600  # Convert to hours
+        
+        print(f"    Time distribution:")
+        for alias, hours in project_times.items():
+            print(f"      {alias}: {hours:.1f} hours")
+        
+        # Assertions
+        self.assertGreaterEqual(successful_sessions, session_count * 0.9,
+                               "Too many failed context switches")
+        self.assertEqual(len(project_times), 3, "All 3 projects should have time logged")
+        
+        total_hours = sum(project_times.values())
+        expected_hours = sum(duration for _, _, duration in work_sessions) / 60
+        self.assertAlmostEqual(total_hours, expected_hours, places=1,
+                              msg="Total time mismatch in context switching")
+        
+        print("  ✅ Context switching workflow completed successfully")
+    
+    def test_month_end_reporting_workflow(self):
+        """Test month-end reporting and data aggregation workflow"""
+        print("\n=== User Workflow: Month-End Reporting ===")
+        
+        dm = ProjectDataManager(str(self.test_data_file))
+        self.assertTrue(dm.load_projects(), "Failed to load initial data")
+        
+        # Phase 1: Generate month's worth of time data
+        print("  Phase 1: Generating month's worth of time data...")
+        
+        base_date = datetime(2025, 7, 1)  # July 2025
+        working_days = 22  # Typical working days in a month
+        
+        daily_schedules = [
+            # Mon-Fri patterns
+            [("webapp", "frontend", 2.5), ("webapp", "backend", 1.5), ("mobile", "design", 2), ("data", "analysis", 1.5)],
+            [("mobile", "dev", 3), ("webapp", "testing", 2), ("data", "collection", 2), ("webapp", "database", 0.5)],
+            [("data", "analysis", 2.5), ("webapp", "frontend", 2), ("mobile", "design", 1.5), ("webapp", "backend", 1.5)],
+            [("webapp", "testing", 2), ("mobile", "dev", 2.5), ("data", "report", 2), ("webapp", "database", 1)],
+            [("mobile", "store", 1.5), ("webapp", "frontend", 3), ("data", "analysis", 1.5), ("mobile", "design", 1.5)],
+        ]
+        
+        for day in range(working_days):
+            work_date = (base_date + timedelta(days=day)).strftime("%Y-%m-%d")
+            
+            # Use different schedule pattern based on day of week
+            schedule = daily_schedules[day % 5]
+            
+            for project_alias, sub_activity_alias, hours in schedule:
+                # Find project and sub-activity
+                project = None
+                for p in dm.projects:
+                    if p.alias == project_alias:
+                        project = p
+                        break
+                
+                if not project:
+                    continue
+                
+                sub_activity = None
+                for sa in project.sub_activities:
+                    if sa.alias == sub_activity_alias:
+                        sub_activity = sa
+                        break
+                
+                if not sub_activity:
+                    continue
+                
+                # Add time record
+                sub_activity.time_records[work_date] = TimeRecord(
+                    date=work_date,
+                    total_seconds=int(hours * 3600)
+                )
+        
+        # Save the generated data
+        save_result = dm.save_projects(force=True)
+        self.assertTrue(save_result, "Failed to save month data")
+        
+        # Phase 2: Generate month-end reports
+        print("  Phase 2: Generating month-end reports...")
+        
+        # Calculate project totals for July 2025
+        july_totals = {}
+        july_details = {}
+        
+        for project in dm.projects:
+            project_total = 0
+            project_details = {}
+            
+            for sub_activity in project.sub_activities:
+                sub_activity_total = 0
+                
+                for date_str, record in sub_activity.time_records.items():
+                    # Check if date is in July 2025
+                    try:
+                        record_date = datetime.strptime(date_str, "%Y-%m-%d")
+                        if record_date.year == 2025 and record_date.month == 7:
+                            sub_activity_total += record.total_seconds
+                            project_total += record.total_seconds
+                    except ValueError:
+                        continue
+                
+                if sub_activity_total > 0:
+                    project_details[sub_activity.alias] = sub_activity_total / 3600  # Convert to hours
+            
+            if project_total > 0:
+                july_totals[project.alias] = project_total / 3600
+                july_details[project.alias] = project_details
+        
+        # Phase 3: Validate reporting data
+        print("  Phase 3: Validating reporting data...")
+        
+        print(f"    July 2025 Project Summary:")
+        total_month_hours = 0
+        
+        for project_alias, total_hours in july_totals.items():
+            print(f"      {project_alias}: {total_hours:.1f} hours")
+            total_month_hours += total_hours
+            
+            # Verify sub-activity breakdown
+            if project_alias in july_details:
+                for sub_alias, sub_hours in july_details[project_alias].items():
+                    print(f"        └─ {sub_alias}: {sub_hours:.1f} hours")
+        
+        print(f"    Total month hours: {total_month_hours:.1f}")
+        
+        # Assertions for realistic month-end data
+        self.assertGreater(total_month_hours, 150, "Monthly total should be >150 hours (realistic for full-time work)")
+        self.assertLess(total_month_hours, 200, "Monthly total should be <200 hours (reasonable upper bound)")
+        self.assertEqual(len(july_totals), 3, "All 3 projects should have July time")
+        
+        # Verify each project has reasonable distribution
+        for project_alias, total_hours in july_totals.items():
+            self.assertGreater(total_hours, 30, f"Project {project_alias} should have >30 hours")
+            
+            # Verify sub-activity distribution
+            if project_alias in july_details:
+                sub_activity_count = len(july_details[project_alias])
+                self.assertGreater(sub_activity_count, 0, f"Project {project_alias} should have sub-activity time")
+        
+        # Phase 4: Simulate report export/save
+        print("  Phase 4: Simulating report export...")
+        
+        # Create a summary report structure (as would be done in real reporting)
+        monthly_report = {
+            "report_month": "2025-07",
+            "generated_date": datetime.now().isoformat(),
+            "project_totals": july_totals,
+            "project_details": july_details,
+            "total_hours": total_month_hours,
+            "working_days": working_days
+        }
+        
+        # Save report to file (simulate export)
+        report_file = Path(self.temp_dir) / "july_2025_report.json"
+        with open(report_file, 'w', encoding='utf-8') as f:
+            json.dump(monthly_report, f, indent=2)
+        
+        # Verify report file
+        self.assertTrue(report_file.exists(), "Report file should be created")
+        
+        # Reload and verify report content
+        with open(report_file, 'r', encoding='utf-8') as f:
+            loaded_report = json.load(f)
+        
+        self.assertEqual(loaded_report["report_month"], "2025-07")
+        self.assertEqual(loaded_report["total_hours"], total_month_hours)
+        self.assertEqual(len(loaded_report["project_totals"]), 3)
+        
+        print(f"    Report exported successfully: {report_file.name}")
+        print("  ✅ Month-end reporting workflow completed successfully")
+
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)

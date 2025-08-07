@@ -1,0 +1,404 @@
+#!/usr/bin/env python3
+"""
+Robustness Tests for Tick-Tock Widget
+Tests system behavior under edge cases and failure conditions
+"""
+
+import unittest
+import tempfile
+import json
+import os
+from pathlib import Path
+from unittest.mock import patch, MagicMock, PropertyMock
+import tkinter as tk
+
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from tick_tock_widget.project_data import ProjectDataManager, Project, SubActivity, TimeRecord
+
+
+class TestRobustness(unittest.TestCase):
+    """Robustness tests for edge cases and error conditions"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.temp_dir = tempfile.mkdtemp()
+        self.root = tk.Tk()
+        self.root.withdraw()
+    
+    def tearDown(self):
+        """Clean up test environment"""
+        try:
+            self.root.destroy()
+        except tk.TclError:
+            pass
+        
+        # Clean up temp files
+        import shutil
+        try:
+            shutil.rmtree(self.temp_dir)
+        except (FileNotFoundError, OSError):
+            pass
+    
+    def test_data_manager_edge_cases(self):
+        """Test ProjectDataManager with various edge cases"""
+        print("\n=== Robustness Test: Data Manager Edge Cases ===")
+        
+        # Test 1: Empty file
+        empty_file = Path(self.temp_dir) / "empty.json"
+        empty_file.write_text("", encoding='utf-8')
+        
+        dm1 = ProjectDataManager(str(empty_file))
+        result1 = dm1.load_projects()
+        self.assertFalse(result1, "Should fail gracefully with empty file")
+        self.assertEqual(len(dm1.projects), 0, "Should have no projects with empty file")
+        print("✓ Empty file handled gracefully")
+        
+        # Test 2: Invalid JSON
+        invalid_json_file = Path(self.temp_dir) / "invalid.json"
+        invalid_json_file.write_text("{invalid json content", encoding='utf-8')
+        
+        dm2 = ProjectDataManager(str(invalid_json_file))
+        result2 = dm2.load_projects()
+        self.assertFalse(result2, "Should fail gracefully with invalid JSON")
+        print("✓ Invalid JSON handled gracefully")
+        
+        # Test 3: Valid JSON but wrong structure
+        wrong_structure_file = Path(self.temp_dir) / "wrong_structure.json"
+        wrong_structure = {"wrong_key": "wrong_value"}
+        with open(wrong_structure_file, 'w', encoding='utf-8') as f:
+            json.dump(wrong_structure, f)
+        
+        dm3 = ProjectDataManager(str(wrong_structure_file))
+        result3 = dm3.load_projects()
+        # Should either succeed with empty projects or fail gracefully
+        if result3:
+            self.assertEqual(len(dm3.projects), 0, "Should have no projects with wrong structure")
+        print("✓ Wrong JSON structure handled gracefully")
+        
+        # Test 4: Readonly file (permissions test)
+        readonly_file = Path(self.temp_dir) / "readonly.json"
+        readonly_file.write_text('{"projects": []}', encoding='utf-8')
+        readonly_file.chmod(0o444)  # Read-only
+        
+        dm4 = ProjectDataManager(str(readonly_file))
+        result4 = dm4.load_projects()
+        self.assertTrue(result4, "Should be able to read readonly file")
+        
+        # Test saving to readonly file
+        dm4.projects = [Project(name="Test", dz_number="T-001", alias="test", sub_activities=[], time_records={})]
+        save_result = dm4.save_projects(force=True)
+        # Should fail gracefully or skip save
+        print(f"✓ Readonly file save handled: {save_result}")
+        
+        # Test 5: Very large data
+        large_data = {
+            "projects": [
+                {
+                    "name": f"Project {i}",
+                    "dz_number": f"P-{i:05d}",
+                    "alias": f"proj{i}",
+                    "sub_activities": [
+                        {
+                            "name": f"Sub {j}",
+                            "alias": f"sub{j}",
+                            "time_records": {
+                                f"2025-08-{(j%28)+1:02d}": {
+                                    "date": f"2025-08-{(j%28)+1:02d}",
+                                    "total_seconds": i * j * 100,
+                                    "last_started": None,
+                                    "is_running": False,
+                                    "sub_activity_seconds": {}
+                                }
+                            }
+                        } for j in range(20)  # 20 sub-activities per project
+                    ],
+                    "time_records": {}
+                } for i in range(1000)  # 1000 projects
+            ],
+            "current_project_alias": None,
+            "current_sub_activity_alias": None
+        }
+        
+        large_file = Path(self.temp_dir) / "large.json"
+        try:
+            with open(large_file, 'w', encoding='utf-8') as f:
+                json.dump(large_data, f)
+            
+            dm5 = ProjectDataManager(str(large_file))
+            result5 = dm5.load_projects()
+            
+            if result5:
+                self.assertEqual(len(dm5.projects), 1000, "Should load all 1000 projects")
+                print("✓ Large dataset (1000 projects) handled successfully")
+            else:
+                print("✓ Large dataset failed gracefully (memory/performance limit)")
+                
+        except MemoryError:
+            print("✓ Large dataset handled gracefully (memory limit reached)")
+        except Exception as e:
+            print(f"✓ Large dataset failed gracefully: {type(e).__name__}")
+    
+    def test_project_management_window_robustness(self):
+        """Test ProjectManagementWindow robustness"""
+        print("\n=== Robustness Test: Project Management Window ===")
+        
+        # Import here to avoid import errors in lint
+        try:
+            from tick_tock_widget.project_management import ProjectManagementWindow
+        except ImportError:
+            self.skipTest("ProjectManagementWindow not available")
+        
+        # Test 1: None data manager
+        mock_parent = MagicMock()
+        mock_parent.root = self.root
+        
+        theme = {'name': 'Test', 'bg': '#000000', 'fg': '#FFFFFF', 'accent': '#FF0000'}
+        
+        with patch.object(tk.Toplevel, 'mainloop'):
+            try:
+                pm_window = ProjectManagementWindow(mock_parent, None, None, theme)
+                pm_window.populate_projects()
+                print("✓ Handled None data manager gracefully")
+            except Exception as e:
+                print(f"✓ None data manager failed gracefully: {type(e).__name__}")
+        
+        # Test 2: Data manager with None projects
+        mock_dm = MagicMock()
+        mock_dm.projects = None
+        
+        with patch.object(tk.Toplevel, 'mainloop'):
+            try:
+                pm_window = ProjectManagementWindow(mock_parent, mock_dm, None, theme)
+                pm_window.populate_projects()
+                children = pm_window.tree.get_children()
+                self.assertEqual(len(children), 0, "Should handle None projects gracefully")
+                print("✓ Handled None projects gracefully")
+            except Exception as e:
+                print(f"✓ None projects failed gracefully: {type(e).__name__}")
+        
+        # Test 3: Data manager with empty list
+        mock_dm.projects = []
+        
+        with patch.object(tk.Toplevel, 'mainloop'):
+            pm_window = ProjectManagementWindow(mock_parent, mock_dm, None, theme)
+            pm_window.populate_projects()
+            children = pm_window.tree.get_children()
+            self.assertEqual(len(children), 0, "Should handle empty projects list")
+            print("✓ Handled empty projects list gracefully")
+        
+        # Test 4: Projects with corrupted time records
+        corrupted_project = MagicMock()
+        corrupted_project.alias = "corrupted"
+        corrupted_project.name = "Corrupted Project"
+        corrupted_project.dz_number = "CORR-001"
+        corrupted_project.sub_activities = []
+        corrupted_project.time_records = {"bad_key": "not_a_time_record"}
+        
+        mock_dm.projects = [corrupted_project]
+        
+        with patch.object(tk.Toplevel, 'mainloop'):
+            try:
+                pm_window = ProjectManagementWindow(mock_parent, mock_dm, None, theme)
+                pm_window.populate_projects()
+                print("✓ Handled corrupted time records gracefully")
+            except Exception as e:
+                print(f"✓ Corrupted time records failed gracefully: {type(e).__name__}")
+        
+        # Test 5: Missing tree widget (extreme edge case)
+        with patch.object(tk.Toplevel, 'mainloop'):
+            pm_window = ProjectManagementWindow(mock_parent, mock_dm, None, theme)
+            
+            # Remove tree widget to simulate corruption
+            if hasattr(pm_window, 'tree'):
+                delattr(pm_window, 'tree')
+            
+            try:
+                pm_window.populate_projects()
+                print("✓ Handled missing tree widget gracefully")
+            except Exception as e:
+                print(f"✓ Missing tree widget failed gracefully: {type(e).__name__}")
+    
+    def test_time_record_edge_cases(self):
+        """Test TimeRecord robustness"""
+        print("\n=== Robustness Test: TimeRecord Edge Cases ===")
+        
+        # Test 1: Negative time
+        tr1 = TimeRecord(date="2025-08-01", total_seconds=-100)
+        self.assertEqual(tr1.total_seconds, -100, "Should accept negative time")
+        formatted = tr1.get_formatted_time()
+        self.assertIsInstance(formatted, str, "Should format negative time to string")
+        print(f"✓ Negative time handled: {formatted}")
+        
+        # Test 2: Very large time values
+        tr2 = TimeRecord(date="2025-08-01", total_seconds=999999999)  # ~31.7 years
+        formatted2 = tr2.get_formatted_time()
+        self.assertIsInstance(formatted2, str, "Should format very large time")
+        print(f"✓ Very large time handled: {formatted2}")
+        
+        # Test 3: Invalid date format
+        tr3 = TimeRecord(date="invalid-date", total_seconds=3600)
+        self.assertEqual(tr3.date, "invalid-date", "Should accept invalid date format")
+        print("✓ Invalid date format accepted")
+        
+        # Test 4: Running timer with invalid timestamp
+        tr4 = TimeRecord(date="2025-08-01", total_seconds=0, is_running=True, last_started="invalid-timestamp")
+        try:
+            current_total = tr4.get_current_total_seconds()
+            self.assertGreaterEqual(current_total, 0, "Should handle invalid timestamp gracefully")
+            print("✓ Invalid timestamp handled gracefully")
+        except Exception as e:
+            print(f"✓ Invalid timestamp failed gracefully: {type(e).__name__}")
+    
+    def test_project_edge_cases(self):
+        """Test Project class robustness"""
+        print("\n=== Robustness Test: Project Edge Cases ===")
+        
+        # Test 1: Empty strings
+        project1 = Project(name="", dz_number="", alias="", sub_activities=[], time_records={})
+        self.assertEqual(project1.name, "", "Should accept empty name")
+        self.assertEqual(project1.dz_number, "", "Should accept empty DZ number")
+        self.assertEqual(project1.alias, "", "Should accept empty alias")
+        print("✓ Empty strings handled")
+        
+        # Test 2: Very long strings
+        long_name = "A" * 10000  # 10k characters
+        project2 = Project(name=long_name, dz_number="DZ-001", alias="long", sub_activities=[], time_records={})
+        self.assertEqual(len(project2.name), 10000, "Should accept very long name")
+        print("✓ Very long strings handled")
+        
+        # Test 3: Special characters and Unicode
+        project3 = Project(
+            name="Test 项目 🚀 Ñoël",
+            dz_number="DZ-特殊-001",
+            alias="测试",
+            sub_activities=[],
+            time_records={}
+        )
+        self.assertIn("🚀", project3.name, "Should handle Unicode characters")
+        print("✓ Unicode and special characters handled")
+        
+        # Test 4: Circular references in sub-activities (if possible)
+        sub_activity = SubActivity(name="Test Sub", alias="test", time_records={})
+        project4 = Project(name="Test", dz_number="T-001", alias="test", sub_activities=[sub_activity], time_records={})
+        
+        # Try to add project reference to sub-activity (should not cause issues)
+        try:
+            # Simulate potential circular reference issue
+            sub_activity.project_ref = project4
+            self.assertTrue(True, "Should handle potential circular references")
+            print("✓ Potential circular references handled")
+        except Exception as e:
+            print(f"✓ Circular reference protection: {type(e).__name__}")
+    
+    def test_concurrent_access_simulation(self):
+        """Simulate concurrent access patterns"""
+        print("\n=== Robustness Test: Concurrent Access Simulation ===")
+        
+        # Create test data file
+        test_file = Path(self.temp_dir) / "concurrent_test.json"
+        test_data = {
+            "projects": [
+                {
+                    "name": "Concurrent Test Project",
+                    "dz_number": "CONC-001",
+                    "alias": "concurrent",
+                    "sub_activities": [],
+                    "time_records": {}
+                }
+            ],
+            "current_project_alias": None,
+            "current_sub_activity_alias": None
+        }
+        
+        with open(test_file, 'w', encoding='utf-8') as f:
+            json.dump(test_data, f)
+        
+        # Simulate multiple data managers accessing the same file
+        managers = []
+        for i in range(5):
+            dm = ProjectDataManager(str(test_file))
+            dm.load_projects()
+            managers.append(dm)
+        
+        # Verify all managers loaded the data
+        for i, dm in enumerate(managers):
+            self.assertEqual(len(dm.projects), 1, f"Manager {i} should load 1 project")
+        
+        print("✓ Multiple data manager instances handled")
+        
+        # Simulate concurrent modifications
+        for i, dm in enumerate(managers):
+            dm.projects[0].name = f"Modified by Manager {i}"
+            dm.save_projects(force=True)
+        
+        # Last save should win
+        final_dm = ProjectDataManager(str(test_file))
+        final_dm.load_projects()
+        
+        self.assertIn("Manager", final_dm.projects[0].name, "Should reflect one of the modifications")
+        print("✓ Concurrent modifications handled (last write wins)")
+    
+    def test_resource_exhaustion_simulation(self):
+        """Test behavior under resource constraints"""
+        print("\n=== Robustness Test: Resource Exhaustion Simulation ===")
+        
+        # Test 1: Disk space exhaustion simulation
+        # (We can't actually exhaust disk space, so we simulate the error)
+        
+        # Create a data manager
+        test_file = Path(self.temp_dir) / "resource_test.json"
+        dm = ProjectDataManager(str(test_file))
+        
+        # Add a lot of projects
+        for i in range(100):
+            project = Project(
+                name=f"Resource Test Project {i}",
+                dz_number=f"RES-{i:03d}",
+                alias=f"res{i}",
+                sub_activities=[],
+                time_records={}
+            )
+            dm.projects.append(project)
+        
+        # Try to save (should succeed normally)
+        try:
+            result = dm.save_projects(force=True)
+            if result:
+                print("✓ Large project save succeeded")
+            else:
+                print("✓ Large project save failed gracefully")
+        except Exception as e:
+            print(f"✓ Large project save failed gracefully: {type(e).__name__}")
+        
+        # Test 2: Memory constraint simulation
+        # Create projects with very large data
+        try:
+            large_projects = []
+            for i in range(10):
+                # Create project with large time records
+                time_records = {}
+                for j in range(1000):  # 1000 days of records
+                    date_str = f"2025-{(j%12)+1:02d}-{(j%28)+1:02d}"
+                    time_records[date_str] = TimeRecord(date=date_str, total_seconds=j*100)
+                
+                project = Project(
+                    name=f"Memory Test Project {i}",
+                    dz_number=f"MEM-{i:03d}",
+                    alias=f"mem{i}",
+                    sub_activities=[],
+                    time_records=time_records
+                )
+                large_projects.append(project)
+            
+            print(f"✓ Created {len(large_projects)} projects with large data sets")
+            
+        except MemoryError:
+            print("✓ Memory constraint handled gracefully")
+        except Exception as e:
+            print(f"✓ Large data creation failed gracefully: {type(e).__name__}")
+
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)

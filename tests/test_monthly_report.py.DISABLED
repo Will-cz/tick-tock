@@ -1,0 +1,483 @@
+"""
+Tests for MonthlyReportWindow functionality
+"""
+
+import unittest
+import tempfile
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+import tkinter as tk
+from datetime import datetime, date
+
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from tick_tock_widget.monthly_report import MonthlyReportWindow
+from tick_tock_widget.project_data import ProjectDataManager, Project, TimeRecord
+
+
+class TestMonthlyReportWindow(unittest.TestCase):
+    """Test MonthlyReportWindow functionality"""
+    
+    def setUp(self):
+        """Set up test environment with comprehensive GUI mocking"""
+        self.temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        self.temp_file.close()
+        
+        # Create mock parent widget that prevents timers
+        self.mock_parent = MagicMock()
+        self.mock_parent.root = MagicMock()
+        # Critical: Mock after() method to prevent timer creation
+        self.mock_parent.root.after = MagicMock(return_value="mock_timer_id")
+        self.mock_parent.root.after_cancel = MagicMock()
+        # Mock positioning methods for center_window
+        self.mock_parent.root.winfo_x.return_value = 100
+        self.mock_parent.root.winfo_y.return_value = 100
+        
+        # Create mock data manager
+        self.mock_data_manager = MagicMock(spec=ProjectDataManager)
+        self.mock_data_manager.projects = []
+        
+        # Test theme
+        self.test_theme = {
+            'name': 'Test',
+            'bg': '#000000',
+            'fg': '#FFFFFF',
+            'accent': '#FF0000',
+            'button_bg': '#111111',
+            'button_fg': '#EEEEEE',
+            'button_active': '#222222'
+        }
+    
+    def tearDown(self):
+        """Clean up test environment"""
+        if Path(self.temp_file.name).exists():
+            Path(self.temp_file.name).unlink()
+    
+    @patch('tkinter.StringVar')
+    @patch('tkinter.ttk.Treeview')
+    @patch('tkinter.ttk.Button')
+    @patch('tkinter.ttk.Label')
+    @patch('tkinter.ttk.Frame')
+    @patch('tkinter.Toplevel')
+    def test_window_initialization(self, mock_toplevel, mock_frame, mock_label, mock_button, mock_treeview, mock_stringvar):
+        """Test monthly report window initialization"""
+        # Configure mock window
+        mock_window = MagicMock()
+        mock_toplevel.return_value = mock_window
+        mock_window.winfo_screenwidth.return_value = 1920
+        mock_window.winfo_screenheight.return_value = 1080
+        mock_window.update_idletasks.return_value = None
+        
+        # Configure StringVar mocks
+        mock_stringvar.return_value = MagicMock()
+        
+        window = MonthlyReportWindow(
+            self.mock_parent,
+            self.mock_data_manager,
+            self.test_theme
+        )
+        
+        # Verify basic initialization
+        self.assertIsNotNone(window.window)
+        self.assertEqual(window.data_manager, self.mock_data_manager)
+        self.assertEqual(window.theme, self.test_theme)
+        
+        # Verify current month/year are set
+        current_date = datetime.now()
+        self.assertEqual(window.current_year, current_date.year)
+        self.assertEqual(window.current_month, current_date.month)
+    
+    def test_window_setup(self):
+        """Test window setup properties"""
+        with patch.object(tk.Toplevel, 'mainloop'):
+            window = MonthlyReportWindow(
+                self.mock_parent,
+                self.mock_data_manager,
+                self.test_theme
+            )
+            
+            # Verify window properties
+            self.assertTrue("Monthly Report" in window.window.title())
+            self.assertTrue(window.window.overrideredirect())
+            
+            # Verify always on top
+            try:
+                self.assertTrue(window.window.attributes('-topmost'))
+            except tk.TclError:
+                # May not be supported on all platforms
+                pass
+    
+    def test_theme_application(self):
+        """Test theme application"""
+        with patch.object(tk.Toplevel, 'mainloop'):
+            window = MonthlyReportWindow(
+                self.mock_parent,
+                self.mock_data_manager,
+                self.test_theme
+            )
+            
+            # Verify theme was applied
+            self.assertEqual(window.theme, self.test_theme)
+    
+    def test_default_theme(self):
+        """Test default theme when none provided"""
+        with patch.object(tk.Toplevel, 'mainloop'):
+            window = MonthlyReportWindow(
+                self.mock_parent,
+                self.mock_data_manager,
+                None  # No theme provided
+            )
+            
+            # Should use default Matrix theme
+            self.assertEqual(window.theme['name'], 'Matrix')
+            self.assertEqual(window.theme['bg'], '#001100')
+            self.assertEqual(window.theme['fg'], '#00FF00')
+    
+    def test_window_close_handling(self):
+        """Test window close event handling"""
+        with patch.object(tk.Toplevel, 'mainloop'):
+            window = MonthlyReportWindow(
+                self.mock_parent,
+                self.mock_data_manager,
+                self.test_theme
+            )
+            
+            # Verify close protocol is set
+            # (Testing actual close behavior would require more complex mocking)
+            self.assertFalse(window.window_closed)
+    
+    def test_update_report_no_data(self):
+        """Test updating report with no project data"""
+        self.mock_data_manager.projects = []
+        
+        with patch.object(tk.Toplevel, 'mainloop'):
+            window = MonthlyReportWindow(
+                self.mock_parent,
+                self.mock_data_manager,
+                self.test_theme
+            )
+            
+            # Should handle empty data gracefully
+            window.update_report()
+            # No specific assertions as this mainly involves GUI updates
+    
+    @patch('tkinter.StringVar')
+    @patch('tkinter.ttk.Treeview')
+    @patch('tkinter.ttk.Button')
+    @patch('tkinter.ttk.Label')
+    @patch('tkinter.ttk.Frame')
+    @patch('tkinter.Toplevel')
+    def test_date_navigation(self, mock_toplevel, mock_frame, mock_label, mock_button, mock_treeview, mock_stringvar):
+        """Test month/year navigation"""
+        # Configure mock window
+        mock_window = MagicMock()
+        mock_toplevel.return_value = mock_window
+        mock_window.winfo_screenwidth.return_value = 1920
+        mock_window.winfo_screenheight.return_value = 1080
+        mock_window.update_idletasks.return_value = None
+        
+        # Configure StringVar mocks
+        mock_stringvar.return_value = MagicMock()
+        
+        window = MonthlyReportWindow(
+            self.mock_parent,
+            self.mock_data_manager,
+            self.test_theme
+        )
+        
+        initial_year = window.current_year
+        initial_month = window.current_month
+        
+        # Test changing month (mock methods if they exist)
+        if hasattr(window, 'next_month'):
+            window.next_month()
+            # Could be same month if we're at December
+            self.assertTrue(window.current_month >= initial_month or window.current_year > initial_year)
+        
+        if hasattr(window, 'previous_month'):
+                window.previous_month()
+                # Should go back
+    
+    def test_center_window(self):
+        """Test window centering functionality"""
+        with patch.object(tk.Toplevel, 'mainloop'):
+            window = MonthlyReportWindow(
+                self.mock_parent,
+                self.mock_data_manager,
+                self.test_theme
+            )
+            
+            # Test center window method
+            window.center_window()
+            
+            # Verify window position was set
+            # (Exact position testing would require more complex setup)
+            self.assertIsNotNone(window.window)
+    
+    def test_window_close_callback(self):
+        """Test window close callback"""
+        with patch.object(tk.Toplevel, 'mainloop'):
+            window = MonthlyReportWindow(
+                self.mock_parent,
+                self.mock_data_manager,
+                self.test_theme
+            )
+            
+            # Test close callback
+            window.on_window_close()
+            
+            # Verify window_closed flag was set
+            self.assertTrue(window.window_closed)
+
+
+class TestMonthlyReportWindowIntegration(unittest.TestCase):
+    """Integration tests for MonthlyReportWindow"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        self.temp_file.close()
+        
+        # Create real data manager for integration tests
+        self.data_manager = ProjectDataManager(self.temp_file.name)
+        
+        # Create mock parent widget
+        self.mock_parent = MagicMock()
+        self.mock_parent.root = tk.Tk()
+        
+        self.test_theme = {
+            'name': 'Matrix',
+            'bg': '#001100',
+            'fg': '#00FF00',
+            'accent': '#00AA00',
+            'button_bg': '#003300',
+            'button_fg': '#00FF00',
+            'button_active': '#004400'
+        }
+    
+    def tearDown(self):
+        """Clean up test environment"""
+        if hasattr(self, 'mock_parent') and self.mock_parent.root:
+            try:
+                self.mock_parent.root.destroy()
+            except tk.TclError:
+                pass
+        
+        if Path(self.temp_file.name).exists():
+            Path(self.temp_file.name).unlink()
+    
+    def test_integration_with_real_data(self):
+        """Test integration with real project data"""
+        # Add test projects with time data
+        project1 = self.data_manager.add_project("Project 1", "PROJ-001", "proj1")
+        project2 = self.data_manager.add_project("Project 2", "PROJ-002", "proj2")
+        
+        if project1 and project2:
+            # Add time records for current month
+            today = date.today()
+            date_str = today.isoformat()
+            
+            project1.time_records[date_str] = TimeRecord(date=date_str, total_seconds=28800)  # 8 hours
+            project2.time_records[date_str] = TimeRecord(date=date_str, total_seconds=14400)  # 4 hours
+            
+            # Add sub-activities with time
+            sub1 = project1.add_sub_activity("Development", "dev")
+            sub1.time_records[date_str] = TimeRecord(date=date_str, total_seconds=18000)  # 5 hours
+        
+        with patch.object(tk.Toplevel, 'mainloop'):
+            window = MonthlyReportWindow(
+                self.mock_parent,
+                self.data_manager,
+                self.test_theme
+            )
+            
+            # Verify window can handle real data
+            self.assertIsNotNone(window)
+            self.assertEqual(window.data_manager, self.data_manager)
+            self.assertEqual(len(self.data_manager.projects), 2)
+    
+    def test_report_generation_with_data(self):
+        """Test report generation with actual time data"""
+        # Create project with time data across multiple days
+        project = self.data_manager.add_project("Test Project", "TEST-001", "test")
+        
+        if project:
+            # Add time records for multiple dates
+            dates = ["2025-01-01", "2025-01-02", "2025-01-03"]
+            times = [7200, 14400, 10800]  # 2, 4, 3 hours
+            
+            for date_str, seconds in zip(dates, times):
+                project.time_records[date_str] = TimeRecord(date=date_str, total_seconds=seconds)
+        
+        with patch.object(tk.Toplevel, 'mainloop'):
+            window = MonthlyReportWindow(
+                self.mock_parent,
+                self.data_manager,
+                self.test_theme
+            )
+            
+            # Test report update with data
+            window.update_report()
+            
+            # Verify window handled the data
+            self.assertIsNotNone(window)
+    
+    def test_multi_project_report(self):
+        """Test report with multiple projects and sub-activities"""
+        # Create complex project structure
+        projects_data = [
+            ("Web Development", "WEB-001", "web"),
+            ("Mobile App", "MOB-002", "mobile"),
+            ("API Backend", "API-003", "api")
+        ]
+        
+        for name, dz_num, alias in projects_data:
+            project = self.data_manager.add_project(name, dz_num, alias)
+            if project:
+                # Add sub-activities
+                project.add_sub_activity("Development", "dev")
+                project.add_sub_activity("Testing", "test")
+                
+                # Add some time data
+                today = date.today().isoformat()
+                project.time_records[today] = TimeRecord(date=today, total_seconds=3600)
+        
+        with patch.object(tk.Toplevel, 'mainloop'):
+            window = MonthlyReportWindow(
+                self.mock_parent,
+                self.data_manager,
+                self.test_theme
+            )
+            
+            # Verify window can handle multiple projects
+            self.assertEqual(len(self.data_manager.projects), 3)
+            
+            # Test report update
+            window.update_report()
+            
+            # Window should handle complex data structure
+            self.assertIsNotNone(window)
+
+
+class TestReportDataProcessing(unittest.TestCase):
+    """Test data processing for monthly reports"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        self.temp_file.close()
+        
+        self.mock_parent = MagicMock()
+        self.mock_parent.root = tk.Tk()
+        
+        self.data_manager = ProjectDataManager(self.temp_file.name)
+        
+        self.test_theme = {
+            'name': 'Test',
+            'bg': '#000000',
+            'fg': '#FFFFFF',
+            'accent': '#FF0000',
+            'button_bg': '#111111',
+            'button_fg': '#EEEEEE',
+            'button_active': '#222222'
+        }
+    
+    def tearDown(self):
+        """Clean up test environment"""
+        if hasattr(self, 'mock_parent') and self.mock_parent.root:
+            try:
+                self.mock_parent.root.destroy()
+            except tk.TclError:
+                pass
+        
+        if Path(self.temp_file.name).exists():
+            Path(self.temp_file.name).unlink()
+    
+    def test_empty_month_data(self):
+        """Test handling of month with no time data"""
+        project = self.data_manager.add_project("Empty Project", "EMPTY-001", "empty")
+        
+        with patch.object(tk.Toplevel, 'mainloop'):
+            window = MonthlyReportWindow(
+                self.mock_parent,
+                self.data_manager,
+                self.test_theme
+            )
+            
+            # Should handle empty month gracefully
+            window.update_report()
+            self.assertIsNotNone(window)
+    
+    def test_partial_month_data(self):
+        """Test handling of month with partial data"""
+        project = self.data_manager.add_project("Partial Project", "PART-001", "partial")
+        
+        if project:
+            # Add data for only a few days
+            project.time_records["2025-01-01"] = TimeRecord(date="2025-01-01", total_seconds=3600)
+            project.time_records["2025-01-15"] = TimeRecord(date="2025-01-15", total_seconds=7200)
+        
+        with patch.object(tk.Toplevel, 'mainloop'):
+            window = MonthlyReportWindow(
+                self.mock_parent,
+                self.data_manager,
+                self.test_theme
+            )
+            
+            # Should handle partial data gracefully
+            window.update_report()
+            self.assertIsNotNone(window)
+    
+    def test_different_month_selection(self):
+        """Test changing month/year for report"""
+        project = self.data_manager.add_project("Test Project", "TEST-001", "test")
+        
+        with patch.object(tk.Toplevel, 'mainloop'):
+            window = MonthlyReportWindow(
+                self.mock_parent,
+                self.data_manager,
+                self.test_theme
+            )
+            
+            # Change to different month
+            original_month = window.current_month
+            original_year = window.current_year
+            
+            # Test month navigation if methods exist
+            if hasattr(window, 'set_month_year'):
+                window.set_month_year(12, 2024)
+                window.update_report()
+            
+            # Should handle month changes
+            self.assertIsNotNone(window)
+
+    def test_report_data_processing(self):
+        """Test that report can process project data"""
+        # Create a project with time records
+        project = self.data_manager.add_project("Data Project", "DP-001", "dataproj")
+        today = date.today().isoformat()
+        
+        # Add some time data
+        if project:
+            time_record = TimeRecord(date=today, total_seconds=3600)
+            project.time_records[today] = time_record
+        
+        with patch.object(tk.Toplevel, 'mainloop'):
+            window = MonthlyReportWindow(
+                self.mock_parent,
+                self.data_manager,
+                self.test_theme
+            )
+            
+            # Test that window can process the data
+            window.update_report()
+            
+            # Verify window has processed projects
+            self.assertEqual(len(self.data_manager.projects), 1)
+            self.assertIsNotNone(window)
+
+
+if __name__ == '__main__':
+    unittest.main()

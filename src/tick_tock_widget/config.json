@@ -1,0 +1,30 @@
+{
+  "environment": "test",
+  "data_files": {
+    "development": "user_data/tick_tock_projects_dev.json",
+    "production": "user_data/tick_tock_projects.json",
+    "test": "user_data/tick_tock_projects_test.json"
+  },
+  "environment_display": {
+    "development": {
+      "window_title": "Tick-Tock Widget [DEV]",
+      "title_color": "#00FF00",
+      "border_color": "#004400"
+    },
+    "production": {
+      "window_title": "Tick-Tock Widget",
+      "title_color": "#FFFFFF",
+      "border_color": "#444444"
+    },
+    "test": {
+      "window_title": "Tick-Tock Widget [TEST]",
+      "title_color": "#FFFF00",
+      "border_color": "#444400"
+    }
+  },
+  "auto_save_interval": 30,
+  "backup_enabled": true,
+  "backup_directory": "user_data/backups",
+  "max_backups": 10,
+  "debug_mode": false
+}

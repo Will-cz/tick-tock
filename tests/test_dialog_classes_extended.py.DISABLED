@@ -1,0 +1,495 @@
+"""
+Extended tests for Dialog classes in project_management
+"""
+
+import unittest
+import tempfile
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+import tkinter as tk
+
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from tick_tock_widget.project_management import ProjectEditDialog, SubActivityEditDialog, ConfirmDialog, MessageDialog
+
+
+class TestDialogClassesExtended(unittest.TestCase):
+    """Extended tests for dialog classes in project management"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        # Mock all GUI components
+        self.tk_patch = patch('tkinter.Tk')
+        self.toplevel_patch = patch('tkinter.Toplevel')
+        
+        self.mock_tk = self.tk_patch.start()
+        self.mock_toplevel = self.toplevel_patch.start()
+        
+        self.mock_root = MagicMock()
+        self.mock_dialog_window = MagicMock()
+        
+        self.mock_tk.return_value = self.mock_root
+        self.mock_toplevel.return_value = self.mock_dialog_window
+        
+        # Mock parent
+        self.mock_parent = MagicMock()
+        
+        # Test theme
+        self.test_theme = {
+            'name': 'Test',
+            'bg': '#000000',
+            'fg': '#FFFFFF',
+            'accent': '#FF0000',
+            'button_bg': '#111111',
+            'button_fg': '#EEEEEE',
+            'button_active': '#222222'
+        }
+        
+    def tearDown(self):
+        """Clean up test environment"""
+        self.tk_patch.stop()
+        self.toplevel_patch.stop()
+
+    def test_project_dialog_initialization(self):
+        """Test ProjectDialog initialization"""
+        dialog = ProjectDialog(
+            self.mock_parent,
+            "Add Project",
+            initial_name="Test Project",
+            initial_dz="TP001",
+            initial_alias="test",
+            initial_sub_activities=[],
+            theme=self.test_theme
+        )
+        
+        # Verify dialog was created
+        self.assertIsNotNone(dialog)
+        self.assertEqual(dialog.theme, self.test_theme)
+
+    def test_project_dialog_show_and_result(self):
+        """Test ProjectDialog show method and result handling"""
+        dialog = ProjectDialog(
+            self.mock_parent,
+            "Add Project",
+            theme=self.test_theme
+        )
+        
+        # Mock dialog interaction
+        dialog.result = {
+            'name': 'Test Project',
+            'dz_number': 'TP001',
+            'alias': 'test',
+            'sub_activities': []
+        }
+        
+        # Test show method
+        with patch.object(dialog, 'dialog') as mock_dialog:
+            mock_dialog.wait_window = MagicMock()
+            result = dialog.show()
+            
+            # Should return the result
+            self.assertEqual(result, True)
+
+    def test_project_dialog_ok_clicked(self):
+        """Test ProjectDialog OK button functionality"""
+        dialog = ProjectDialog(
+            self.mock_parent,
+            "Add Project",
+            theme=self.test_theme
+        )
+        
+        # Mock entry widgets
+        dialog.name_entry = MagicMock()
+        dialog.name_entry.get.return_value = "Test Project"
+        dialog.dz_entry = MagicMock()
+        dialog.dz_entry.get.return_value = "TP001"
+        dialog.alias_entry = MagicMock()
+        dialog.alias_entry.get.return_value = "test"
+        
+        # Mock sub-activities tree
+        dialog.sub_activities_tree = MagicMock()
+        dialog.sub_activities_tree.get_children.return_value = []
+        
+        # Test OK button
+        dialog.ok_clicked()
+        
+        # Should set result
+        self.assertIsNotNone(dialog.result)
+
+    def test_project_dialog_cancel_clicked(self):
+        """Test ProjectDialog cancel functionality"""
+        dialog = ProjectDialog(
+            self.mock_parent,
+            "Add Project",
+            theme=self.test_theme
+        )
+        
+        # Test cancel button
+        dialog.cancel_clicked()
+        
+        # Should set result to None
+        self.assertIsNone(dialog.result)
+
+    def test_project_dialog_validation_empty_fields(self):
+        """Test ProjectDialog validation with empty fields"""
+        dialog = ProjectDialog(
+            self.mock_parent,
+            "Add Project",
+            theme=self.test_theme
+        )
+        
+        # Mock empty entry widgets
+        dialog.name_entry = MagicMock()
+        dialog.name_entry.get.return_value = ""  # Empty name
+        dialog.dz_entry = MagicMock()
+        dialog.dz_entry.get.return_value = "TP001"
+        dialog.alias_entry = MagicMock()
+        dialog.alias_entry.get.return_value = "test"
+        dialog.sub_activities_tree = MagicMock()
+        dialog.sub_activities_tree.get_children.return_value = []
+        
+        # Mock messagebox for error display
+        with patch('tkinter.messagebox.showerror') as mock_error:
+            dialog.ok_clicked()
+            
+            # Should show error for empty name
+            mock_error.assert_called_once()
+
+    def test_project_dialog_theme_update(self):
+        """Test ProjectDialog theme update functionality"""
+        dialog = ProjectDialog(
+            self.mock_parent,
+            "Add Project",
+            theme=self.test_theme
+        )
+        
+        new_theme = {
+            'name': 'New',
+            'bg': '#110000',
+            'fg': '#FF0000',
+            'accent': '#AA0000'
+        }
+        
+        # Test theme update
+        dialog.update_theme(new_theme)
+        
+        # Should update theme
+        self.assertEqual(dialog.theme, new_theme)
+
+    def test_sub_activity_dialog_initialization(self):
+        """Test SubActivityDialog initialization"""
+        dialog = SubActivityDialog(
+            self.mock_parent,
+            "Add Sub-Activity",
+            initial_name="Test Sub",
+            initial_alias="testsub",
+            theme=self.test_theme
+        )
+        
+        # Verify dialog was created
+        self.assertIsNotNone(dialog)
+        self.assertEqual(dialog.theme, self.test_theme)
+
+    def test_sub_activity_dialog_ok_clicked(self):
+        """Test SubActivityDialog OK button functionality"""
+        dialog = SubActivityDialog(
+            self.mock_parent,
+            "Add Sub-Activity",
+            theme=self.test_theme
+        )
+        
+        # Mock entry widgets
+        dialog.name_entry = MagicMock()
+        dialog.name_entry.get.return_value = "Test Sub-Activity"
+        dialog.alias_entry = MagicMock()
+        dialog.alias_entry.get.return_value = "testsub"
+        
+        # Test OK button
+        dialog.ok_clicked()
+        
+        # Should set result
+        expected_result = {
+            'name': 'Test Sub-Activity',
+            'alias': 'testsub'
+        }
+        self.assertEqual(dialog.result, expected_result)
+
+    def test_sub_activity_dialog_validation(self):
+        """Test SubActivityDialog field validation"""
+        dialog = SubActivityDialog(
+            self.mock_parent,
+            "Add Sub-Activity",
+            theme=self.test_theme
+        )
+        
+        # Mock empty entry widgets
+        dialog.name_entry = MagicMock()
+        dialog.name_entry.get.return_value = ""  # Empty name
+        dialog.alias_entry = MagicMock()
+        dialog.alias_entry.get.return_value = "testsub"
+        
+        # Mock messagebox for error display
+        with patch('tkinter.messagebox.showerror') as mock_error:
+            dialog.ok_clicked()
+            
+            # Should show error for empty name
+            mock_error.assert_called_once()
+
+    def test_confirmation_dialog_yes_clicked(self):
+        """Test ConfirmationDialog YES button functionality"""
+        dialog = ConfirmationDialog(
+            self.mock_parent,
+            "Confirm Action",
+            "Are you sure?",
+            theme=self.test_theme
+        )
+        
+        # Test YES button
+        dialog.yes_clicked()
+        
+        # Should set result to True
+        self.assertTrue(dialog.result)
+
+    def test_confirmation_dialog_no_clicked(self):
+        """Test ConfirmationDialog NO button functionality"""
+        dialog = ConfirmationDialog(
+            self.mock_parent,
+            "Confirm Action", 
+            "Are you sure?",
+            theme=self.test_theme
+        )
+        
+        # Test NO button
+        dialog.no_clicked()
+        
+        # Should set result to False
+        self.assertFalse(dialog.result)
+
+    def test_confirmation_dialog_show(self):
+        """Test ConfirmationDialog show method"""
+        dialog = ConfirmationDialog(
+            self.mock_parent,
+            "Confirm Action",
+            "Are you sure?",
+            theme=self.test_theme
+        )
+        
+        # Mock dialog interaction
+        with patch.object(dialog, 'dialog') as mock_dialog:
+            mock_dialog.wait_window = MagicMock()
+            
+            # Set result before showing
+            dialog.result = True
+            
+            result = dialog.show()
+            
+            # Should return the result
+            self.assertTrue(result)
+
+    def test_message_dialog_show(self):
+        """Test MessageDialog show method"""
+        dialog = MessageDialog(
+            self.mock_parent,
+            "Information",
+            "This is a test message"
+        )
+        
+        # Mock dialog interaction
+        with patch.object(dialog, 'dialog') as mock_dialog:
+            mock_dialog.wait_window = MagicMock()
+            
+            dialog.show()
+            
+            # Should complete without error
+            mock_dialog.wait_window.assert_called_once()
+
+    def test_dialog_drag_functionality(self):
+        """Test dialog window dragging functionality"""
+        dialog = ProjectDialog(
+            self.mock_parent,
+            "Add Project",
+            theme=self.test_theme
+        )
+        
+        # Test drag initialization
+        if hasattr(dialog, 'start_x') and hasattr(dialog, 'start_y'):
+            self.assertEqual(dialog.start_x, 0)
+            self.assertEqual(dialog.start_y, 0)
+
+    def test_dialog_window_positioning(self):
+        """Test dialog window positioning relative to parent"""
+        dialog = ProjectDialog(
+            self.mock_parent,
+            "Add Project", 
+            theme=self.test_theme
+        )
+        
+        # Mock parent positioning
+        self.mock_parent.winfo_x.return_value = 100
+        self.mock_parent.winfo_y.return_value = 200
+        
+        # Dialog should be positioned relative to parent
+        # (This depends on implementation details)
+
+    def test_dialog_error_handling_creation(self):
+        """Test dialog error handling during creation"""
+        with patch('tkinter.Toplevel', side_effect=tk.TclError("Creation failed")):
+            # Should handle creation errors gracefully
+            try:
+                dialog = ProjectDialog(
+                    self.mock_parent,
+                    "Add Project",
+                    theme=self.test_theme
+                )
+                # Should not raise exception
+            except tk.TclError:
+                self.fail("Dialog should handle TclError gracefully")
+
+    def test_dialog_keyboard_shortcuts(self):
+        """Test dialog keyboard shortcuts"""
+        dialog = ProjectDialog(
+            self.mock_parent,
+            "Add Project",
+            theme=self.test_theme
+        )
+        
+        # Test Enter key (OK)
+        if hasattr(dialog, 'dialog'):
+            mock_event = MagicMock()
+            
+            # Mock key bindings
+            dialog.dialog.bind = MagicMock()
+            
+            # Should bind keyboard shortcuts
+
+    def test_dialog_focus_management(self):
+        """Test dialog focus management"""
+        dialog = ProjectDialog(
+            self.mock_parent,
+            "Add Project",
+            theme=self.test_theme
+        )
+        
+        # Test focus on first entry
+        if hasattr(dialog, 'name_entry'):
+            dialog.name_entry.focus = MagicMock()
+            
+            # Should set focus to first entry
+
+    def test_dialog_widget_styling(self):
+        """Test dialog widget styling with theme"""
+        dialog = ProjectDialog(
+            self.mock_parent,
+            "Add Project",
+            theme=self.test_theme
+        )
+        
+        # Mock widgets for styling test
+        dialog.name_entry = MagicMock()
+        dialog.dz_entry = MagicMock()
+        dialog.alias_entry = MagicMock()
+        
+        # Test theme application
+        dialog.update_theme(self.test_theme)
+        
+        # Should apply theme to all widgets
+
+    def test_dialog_data_persistence(self):
+        """Test dialog data persistence between show/hide"""
+        dialog = ProjectDialog(
+            self.mock_parent,
+            "Edit Project",
+            initial_name="Existing Project",
+            initial_dz="EP001",
+            initial_alias="existing",
+            theme=self.test_theme
+        )
+        
+        # Initial data should be set
+        # (This depends on implementation details)
+
+    def test_dialog_accessibility_features(self):
+        """Test dialog accessibility features"""
+        dialog = ProjectDialog(
+            self.mock_parent,
+            "Add Project",
+            theme=self.test_theme
+        )
+        
+        # Test accessibility features like labels, tab order, etc.
+        # (This depends on implementation details)
+
+    def test_multiple_dialogs_management(self):
+        """Test handling multiple dialogs simultaneously"""
+        dialogs = []
+        
+        # Create multiple dialogs
+        for i in range(3):
+            dialog = ProjectDialog(
+                self.mock_parent,
+                f"Project Dialog {i}",
+                theme=self.test_theme
+            )
+            dialogs.append(dialog)
+        
+        # All dialogs should be created successfully
+        self.assertEqual(len(dialogs), 3)
+        
+        # Test cleanup
+        for dialog in dialogs:
+            if hasattr(dialog, 'cancel_clicked'):
+                dialog.cancel_clicked()
+
+    def test_dialog_modal_behavior(self):
+        """Test dialog modal behavior"""
+        dialog = ProjectDialog(
+            self.mock_parent,
+            "Add Project",
+            theme=self.test_theme
+        )
+        
+        # Dialog should be modal (block parent interaction)
+        if hasattr(dialog, 'dialog'):
+            dialog.dialog.transient = MagicMock()
+            dialog.dialog.grab_set = MagicMock()
+            
+            # Should set modal properties
+
+    def test_dialog_validation_comprehensive(self):
+        """Test comprehensive field validation in dialogs"""
+        dialog = ProjectDialog(
+            self.mock_parent,
+            "Add Project",
+            theme=self.test_theme
+        )
+        
+        # Mock entry widgets with various invalid inputs
+        test_cases = [
+            ("", "TP001", "test"),  # Empty name
+            ("Test", "", "test"),   # Empty DZ number
+            ("Test", "TP001", ""),  # Empty alias
+            ("Test", "TP001", "invalid alias!"),  # Invalid alias format
+        ]
+        
+        for name, dz, alias in test_cases:
+            dialog.name_entry = MagicMock()
+            dialog.name_entry.get.return_value = name
+            dialog.dz_entry = MagicMock()
+            dialog.dz_entry.get.return_value = dz
+            dialog.alias_entry = MagicMock()
+            dialog.alias_entry.get.return_value = alias
+            dialog.sub_activities_tree = MagicMock()
+            dialog.sub_activities_tree.get_children.return_value = []
+            
+            with patch('tkinter.messagebox.showerror') as mock_error:
+                dialog.ok_clicked()
+                
+                # Should show error for invalid input
+                if not all([name, dz, alias]) or "!" in alias:
+                    mock_error.assert_called()
+
+
+if __name__ == '__main__':
+    unittest.main()

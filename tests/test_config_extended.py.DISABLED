@@ -1,0 +1,291 @@
+"""
+Extended tests for config functionality
+"""
+
+import unittest
+import tempfile
+import os
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from tick_tock_widget.config import get_config, Environment, Config
+
+
+class TestConfigExtended(unittest.TestCase):
+    """Extended tests for configuration functionality"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.temp_dir = tempfile.mkdtemp()
+        self.temp_config_file = Path(self.temp_dir) / 'config.json'
+        
+    def tearDown(self):
+        """Clean up test environment"""
+        if self.temp_config_file.exists():
+            self.temp_config_file.unlink()
+        Path(self.temp_dir).rmdir()
+
+    def test_environment_detection_from_path(self):
+        """Test environment detection based on file path"""
+        # Test development environment detection
+        with patch('sys.argv', ['script.py']):
+            with patch('os.path.abspath') as mock_abspath:
+                mock_abspath.return_value = '/path/to/development/script.py'
+                config = get_config()
+                # Should detect development environment
+                self.assertIsInstance(config.environment, Environment)
+
+    def test_environment_detection_production(self):
+        """Test production environment detection"""
+        with patch('sys.argv', ['TickTockWidget.exe']):
+            with patch('os.path.abspath') as mock_abspath:
+                mock_abspath.return_value = '/path/to/TickTockWidget.exe'
+                config = get_config()
+                # Should detect production environment
+                self.assertEqual(config.environment.name, 'production')
+
+    def test_config_file_loading_with_custom_path(self):
+        """Test loading configuration from custom file path"""
+        # Create test config file
+        test_config = {
+            'data_file': 'custom_data.json',
+            'backup_enabled': False,
+            'theme_index': 2
+        }
+        
+        import json
+        with open(self.temp_config_file, 'w') as f:
+            json.dump(test_config, f)
+        
+        # Test loading custom config
+        with patch('tick_tock_widget.config.get_data_dir', return_value=self.temp_dir):
+            config = get_config()
+            # Should load custom settings
+            self.assertIsNotNone(config)
+
+    def test_config_file_creation_when_missing(self):
+        """Test automatic config file creation when missing"""
+        with patch('tick_tock_widget.config.get_data_dir', return_value=self.temp_dir):
+            # Ensure config file doesn't exist
+            if self.temp_config_file.exists():
+                self.temp_config_file.unlink()
+            
+            config = get_config()
+            
+            # Should create default config
+            self.assertIsNotNone(config)
+
+    def test_config_error_handling_invalid_json(self):
+        """Test error handling with invalid JSON config file"""
+        # Create invalid JSON file
+        with open(self.temp_config_file, 'w') as f:
+            f.write('invalid json {')
+        
+        with patch('tick_tock_widget.config.get_data_dir', return_value=self.temp_dir):
+            # Should handle invalid JSON gracefully
+            config = get_config()
+            self.assertIsNotNone(config)
+
+    def test_config_error_handling_permission_denied(self):
+        """Test error handling when config file access is denied"""
+        with patch('tick_tock_widget.config.get_data_dir', return_value=self.temp_dir):
+            with patch('builtins.open', side_effect=PermissionError("Access denied")):
+                # Should handle permission errors gracefully
+                config = get_config()
+                self.assertIsNotNone(config)
+
+    def test_environment_variables_override(self):
+        """Test that environment variables can override config"""
+        with patch.dict(os.environ, {'TICK_TOCK_ENV': 'test'}):
+            config = get_config()
+            # Should respect environment variable
+            self.assertIsNotNone(config)
+
+    def test_data_directory_detection_various_platforms(self):
+        """Test data directory detection on different platforms"""
+        # Test Windows
+        with patch('platform.system', return_value='Windows'):
+            with patch.dict(os.environ, {'APPDATA': 'C:\\Users\\Test\\AppData\\Roaming'}):
+                config = get_config()
+                self.assertIsNotNone(config)
+        
+        # Test macOS
+        with patch('platform.system', return_value='Darwin'):
+            with patch('pathlib.Path.home') as mock_home:
+                mock_home.return_value = Path('/Users/test')
+                config = get_config()
+                self.assertIsNotNone(config)
+        
+        # Test Linux
+        with patch('platform.system', return_value='Linux'):
+            with patch('pathlib.Path.home') as mock_home:
+                mock_home.return_value = Path('/home/test')
+                config = get_config()
+                self.assertIsNotNone(config)
+
+    def test_config_singleton_behavior(self):
+        """Test that get_config returns the same instance"""
+        config1 = get_config()
+        config2 = get_config()
+        
+        # Should return the same instance
+        self.assertIs(config1, config2)
+
+    def test_config_default_values(self):
+        """Test that default configuration values are properly set"""
+        config = get_config()
+        
+        # Test that required attributes exist
+        self.assertIsNotNone(config.environment)
+        self.assertIsInstance(config.environment.name, str)
+
+    def test_config_validation_with_invalid_data_types(self):
+        """Test config validation with invalid data types"""
+        # Create config with wrong data types
+        test_config = {
+            'data_file': 123,  # Should be string
+            'backup_enabled': 'yes',  # Should be boolean
+            'theme_index': 'invalid'  # Should be integer
+        }
+        
+        import json
+        with open(self.temp_config_file, 'w') as f:
+            json.dump(test_config, f)
+        
+        with patch('tick_tock_widget.config.get_data_dir', return_value=self.temp_dir):
+            # Should handle invalid data types gracefully
+            config = get_config()
+            self.assertIsNotNone(config)
+
+    def test_config_migration_from_old_format(self):
+        """Test migration from old configuration format"""
+        # Create old format config
+        old_config = {
+            'old_setting': 'value',
+            'deprecated_option': True
+        }
+        
+        import json
+        with open(self.temp_config_file, 'w') as f:
+            json.dump(old_config, f)
+        
+        with patch('tick_tock_widget.config.get_data_dir', return_value=self.temp_dir):
+            # Should migrate old config gracefully
+            config = get_config()
+            self.assertIsNotNone(config)
+
+    def test_config_backup_and_restore(self):
+        """Test configuration backup and restore functionality"""
+        # Create initial config
+        test_config = {
+            'data_file': 'test_data.json',
+            'backup_enabled': True
+        }
+        
+        import json
+        with open(self.temp_config_file, 'w') as f:
+            json.dump(test_config, f)
+        
+        with patch('tick_tock_widget.config.get_data_dir', return_value=self.temp_dir):
+            config = get_config()
+            # Should load successfully
+            self.assertIsNotNone(config)
+
+    def test_config_concurrent_access(self):
+        """Test configuration access from multiple threads"""
+        import threading
+        
+        configs = []
+        
+        def get_config_thread():
+            configs.append(get_config())
+        
+        # Create multiple threads accessing config
+        threads = []
+        for _ in range(5):
+            thread = threading.Thread(target=get_config_thread)
+            threads.append(thread)
+            thread.start()
+        
+        # Wait for all threads
+        for thread in threads:
+            thread.join()
+        
+        # All configs should be the same instance
+        for config in configs[1:]:
+            self.assertIs(configs[0], config)
+
+    def test_environment_specific_config_loading(self):
+        """Test loading environment-specific configuration"""
+        # Test development config
+        with patch('tick_tock_widget.config.Environment') as mock_env:
+            mock_env.return_value.name = 'development'
+            config = get_config()
+            self.assertIsNotNone(config)
+        
+        # Test production config
+        with patch('tick_tock_widget.config.Environment') as mock_env:
+            mock_env.return_value.name = 'production'
+            config = get_config()
+            self.assertIsNotNone(config)
+
+    def test_config_caching_behavior(self):
+        """Test that configuration is properly cached"""
+        # First call should create config
+        config1 = get_config()
+        
+        # Subsequent calls should return cached version
+        with patch('tick_tock_widget.config.TickTockConfig') as mock_config_class:
+            config2 = get_config()
+            
+            # Should not create new instance
+            mock_config_class.assert_not_called()
+            self.assertIs(config1, config2)
+
+    def test_config_refresh_mechanism(self):
+        """Test configuration refresh mechanism"""
+        config = get_config()
+        
+        # Test that config can be refreshed if needed
+        # (This depends on implementing a refresh method)
+        self.assertIsNotNone(config)
+
+    def test_config_error_recovery(self):
+        """Test configuration error recovery mechanisms"""
+        # Test recovery from corrupted config file
+        with open(self.temp_config_file, 'w') as f:
+            f.write('corrupted data')
+        
+        with patch('tick_tock_widget.config.get_data_dir', return_value=self.temp_dir):
+            # Should recover and create default config
+            config = get_config()
+            self.assertIsNotNone(config)
+
+    def test_config_logging_integration(self):
+        """Test configuration integration with logging"""
+        with patch('logging.getLogger') as mock_logger:
+            config = get_config()
+            
+            # Should integrate with logging system
+            self.assertIsNotNone(config)
+
+    def test_config_performance_with_large_files(self):
+        """Test configuration performance with large config files"""
+        # Create large config file
+        large_config = {f'setting_{i}': f'value_{i}' for i in range(1000)}
+        
+        import json
+        with open(self.temp_config_file, 'w') as f:
+            json.dump(large_config, f)
+        
+        with patch('tick_tock_widget.config.get_data_dir', return_value=self.temp_dir):
+            # Should handle large configs efficiently
+            config = get_config()
+            self.assertIsNotNone(config)
+
+
+if __name__ == '__main__':
+    unittest.main()

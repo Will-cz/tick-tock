@@ -1,0 +1,497 @@
+"""
+Regression Tests for TickTockWidget 
+
+This test module contains regression tests for previously identified bugs and fixes
+in the TickTockWidget application.
+"""
+
+import unittest
+import tempfile
+import json
+import os
+import sys
+from pathlib import Path
+from unittest.mock import patch, MagicMock, call
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+# Import the main widget class
+from tick_tock_widget.tick_tock_widget import TickTockWidget
+from tests.gui_test_utils import SafeGUITestCase, no_gui_blocking
+
+
+class TestTickTockWidgetRegression(SafeGUITestCase):
+    """Regression tests for TickTockWidget covering previously identified bugs and fixes"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        super().setUp()
+        
+        self.temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        self.temp_file.close()
+        
+        # Create test data
+        test_data = {
+            "projects": [
+                {
+                    "name": "Test Project",
+                    "alias": "TP",
+                    "description": "Test project",
+                    "time_records": [],
+                    "metadata": {},
+                    "sub_activities": [
+                        {"name": "Sub Activity", "alias": "SA", "metadata": {}}
+                    ]
+                }
+            ]
+        }
+        
+        with open(self.temp_file.name, 'w', encoding='utf-8') as f:
+            json.dump(test_data, f)
+        
+        self.test_env = {'TICK_TOCK_DATA_FILE': self.temp_file.name}
+        
+    def tearDown(self):
+        """Clean up test environment"""
+        # Clean up temp file
+        try:
+            Path(self.temp_file.name).unlink()
+        except FileNotFoundError:
+            pass
+        
+        # Parent class will handle GUI cleanup
+        super().tearDown()
+    
+    def _create_mock_widget(self):
+        """Helper method to create a properly mocked widget"""
+        with no_gui_blocking():
+            widget = TickTockWidget()
+            self.track_widget(widget)
+            return widget, None  # Return None for mock_root to maintain compatibility
+
+    def test_initialization_complete(self):
+        """Test complete widget initialization with proper mocking"""
+        with patch.dict(os.environ, self.test_env):
+            widget, _ = self._create_mock_widget()
+            
+            # Verify all components initialized
+            self.assertIsNotNone(widget.root)
+            self.assertIsNotNone(widget.config)
+            self.assertIsNotNone(widget.data_manager)
+            self.assertFalse(widget.is_timing)
+            self.assertIsNone(widget.project_mgmt_window)
+            self.assertIsNone(widget.monthly_report_window)
+            self.assertIsNone(widget.minimized_widget)
+            self.assertEqual(widget.current_theme, 0)
+            self.assertEqual(len(widget.themes), 5)
+            
+            # Clean up
+            widget.close_app()
+
+    def test_theme_definitions(self):
+        """Test all theme definitions are complete"""
+        with patch.dict(os.environ, self.test_env):
+            widget, mock_root = self._create_mock_widget()
+            
+            expected_themes = ['Matrix', 'Ocean', 'Fire', 'Cyberpunk', 'Minimal']
+            
+            for i, theme in enumerate(widget.themes):
+                self.assertEqual(theme['name'], expected_themes[i])
+                self.assertIn('bg', theme)
+                self.assertIn('fg', theme)
+                self.assertIn('accent', theme)
+                self.assertIn('button_bg', theme)
+            
+            # Clean up
+            widget.close_app()
+
+    def test_theme_cycling(self):
+        """Test theme cycling functionality"""
+        with patch.dict(os.environ, self.test_env):
+            widget, mock_root = self._create_mock_widget()
+            
+            # Mock the apply_theme method to track calls
+            widget.apply_theme = MagicMock()
+            
+            initial_theme = widget.current_theme
+            widget.cycle_theme()
+            
+            # Verify theme cycling
+            expected_theme = (initial_theme + 1) % len(widget.themes)
+            self.assertEqual(widget.current_theme, expected_theme)
+            widget.apply_theme.assert_called_once()
+            
+            # Clean up
+            widget.close_app()
+
+    def test_theme_application(self):
+        """Test theme application to UI components"""
+        with patch.dict(os.environ, self.test_env):
+            widget, mock_root = self._create_mock_widget()
+            
+            # Mock UI components that would be styled
+            widget.project_combo = MagicMock()
+            widget.toggle_btn = MagicMock()
+            widget.sub_combo = MagicMock()
+            
+            theme = widget.themes[1]  # Ocean theme
+            
+            # Apply theme
+            widget.apply_theme(theme)
+            
+            # Verify root background was set
+            mock_root.configure.assert_called()
+            
+            # Clean up
+            widget.close_app()
+
+    def test_timer_functionality(self):
+        """Test timer start/stop functionality"""
+        with patch.dict(os.environ, self.test_env):
+            widget, mock_root = self._create_mock_widget()
+            
+            # Mock necessary components
+            widget.project_combo = MagicMock()
+            widget.project_combo.get.return_value = "Test Project"
+            widget.sub_combo = MagicMock()
+            widget.sub_combo.get.return_value = "Sub Activity"
+            widget.toggle_btn = MagicMock()
+            widget.update_display = MagicMock()
+            
+            # Test starting timer
+            self.assertFalse(widget.is_timing)
+            widget.toggle_timer()
+            self.assertTrue(widget.is_timing)
+            
+            # Test stopping timer
+            widget.toggle_timer()
+            self.assertFalse(widget.is_timing)
+            
+            # Clean up
+            widget.close_app()
+
+    def test_project_management_window_opening(self):
+        """Test opening project management window"""
+        with patch.dict(os.environ, self.test_env):
+            widget, mock_root = self._create_mock_widget()
+            
+            with patch('tick_tock_widget.project_management.ProjectManagementWindow') as MockPM:
+                mock_pm_instance = MagicMock()
+                MockPM.return_value = mock_pm_instance
+                
+                widget.open_project_management()
+                
+                # Verify window was created
+                MockPM.assert_called_once()
+                self.assertEqual(widget.project_mgmt_window, mock_pm_instance)
+            
+            # Clean up
+            widget.close_app()
+
+    def test_monthly_report_window_opening(self):
+        """Test opening monthly report window"""
+        with patch.dict(os.environ, self.test_env):
+            widget, mock_root = self._create_mock_widget()
+            
+            with patch('tick_tock_widget.monthly_report.MonthlyReportWindow') as MockMR:
+                mock_mr_instance = MagicMock()
+                MockMR.return_value = mock_mr_instance
+                
+                widget.open_monthly_report()
+                
+                # Verify window was created
+                MockMR.assert_called_once()
+                self.assertEqual(widget.monthly_report_window, mock_mr_instance)
+            
+            # Clean up
+            widget.close_app()
+
+    def test_minimized_widget_creation(self):
+        """Test creating minimized widget"""
+        with patch.dict(os.environ, self.test_env):
+            widget, mock_root = self._create_mock_widget()
+            
+            with patch('tick_tock_widget.minimized_widget.MinimizedTickTockWidget') as MockMin:
+                mock_min_instance = MagicMock()
+                MockMin.return_value = mock_min_instance
+                
+                widget.minimize_window()
+                
+                # Verify minimized widget was created
+                MockMin.assert_called_once()
+                self.assertEqual(widget.minimized_widget, mock_min_instance)
+            
+            # Clean up
+            widget.close_app()
+
+    def test_data_persistence(self):
+        """Test data saving functionality"""
+        with patch.dict(os.environ, self.test_env):
+            widget, mock_root = self._create_mock_widget()
+            
+            # Mock data manager save method
+            widget.data_manager.save_projects = MagicMock()
+            
+            widget.save_data()
+            
+            # Verify save was called with force=True
+            widget.data_manager.save_projects.assert_called_with(force=True)
+            
+            # Clean up
+            widget.close_app()
+
+    def test_project_selection_handling(self):
+        """Test project selection event handling"""
+        with patch.dict(os.environ, self.test_env):
+            widget, mock_root = self._create_mock_widget()
+            
+            # Mock UI components
+            widget.project_combo = MagicMock()
+            widget.sub_combo = MagicMock()
+            widget.update_sub_activities = MagicMock()
+            
+            # Simulate project selection
+            widget.on_project_selected(None)  # Event parameter
+            
+            # Verify sub-activities were updated
+            widget.update_sub_activities.assert_called_once()
+            
+            # Clean up
+            widget.close_app()
+
+    def test_window_positioning(self):
+        """Test window positioning functionality"""
+        with patch.dict(os.environ, self.test_env):
+            widget, mock_root = self._create_mock_widget()
+            
+            # Mock screen dimensions
+            mock_root.winfo_screenwidth.return_value = 1920
+            mock_root.winfo_screenheight.return_value = 1080
+            mock_root.winfo_width.return_value = 450
+            mock_root.winfo_height.return_value = 450
+            
+            widget.center_window()
+            
+            # Verify positioning methods were called
+            mock_root.update_idletasks.assert_called()
+            mock_root.geometry.assert_called()
+            
+            # Clean up
+            widget.close_app()
+
+    def test_window_restoration(self):
+        """Test window restoration from minimized state"""
+        with patch.dict(os.environ, self.test_env):
+            widget, mock_root = self._create_mock_widget()
+            
+            # Mock minimized widget
+            mock_minimized = MagicMock()
+            widget.minimized_widget = mock_minimized
+            
+            widget.restore_window()
+            
+            # Verify minimized widget was destroyed and cleared
+            mock_minimized.root.destroy.assert_called_once()
+            self.assertIsNone(widget.minimized_widget)
+            
+            # Verify main window was restored
+            mock_root.deiconify.assert_called_once()
+            
+            # Clean up
+            widget.close_app()
+
+    def test_close_app_functionality(self):
+        """Test application closing with proper cleanup"""
+        with patch.dict(os.environ, self.test_env):
+            widget, mock_root = self._create_mock_widget()
+            
+            # Mock data manager methods
+            widget.data_manager.stop_all_timers = MagicMock()
+            widget.data_manager.save_projects = MagicMock()
+            
+            # Mock minimized widget for cleanup
+            mock_minimized = MagicMock()
+            widget.minimized_widget = mock_minimized
+            
+            widget.close_app()
+            
+            # Verify cleanup sequence
+            widget.data_manager.stop_all_timers.assert_called_once()
+            widget.data_manager.save_projects.assert_called_with(force=True)
+            mock_minimized.root.destroy.assert_called_once()
+            mock_root.destroy.assert_called_once()
+
+    def test_error_handling_in_close_app(self):
+        """Test error handling during app closure"""
+        with patch.dict(os.environ, self.test_env):
+            widget, mock_root = self._create_mock_widget()
+            
+            # Mock minimized widget that raises exception on destroy
+            mock_minimized = MagicMock()
+            mock_minimized.root.destroy.side_effect = Exception("Destroy failed")
+            widget.minimized_widget = mock_minimized
+            
+            # Should not raise exception despite minimized widget error
+            widget.close_app()
+            
+            # Verify main window destroy was still called
+            mock_root.destroy.assert_called_once()
+
+    def test_compatibility_methods(self):
+        """Test compatibility methods for test framework"""
+        with patch.dict(os.environ, self.test_env):
+            widget, mock_root = self._create_mock_widget()
+            
+            # Test toggle_timing alias
+            widget.toggle_timer = MagicMock()
+            widget.toggle_timing()
+            widget.toggle_timer.assert_called_once()
+            
+            # Test update_display alias
+            widget.update_project_display = MagicMock()
+            widget.update_display()
+            widget.update_project_display.assert_called_once()
+            
+            # Test maximize alias
+            widget.restore_window = MagicMock()
+            widget.maximize(100, 200)
+            widget.restore_window.assert_called_with(100, 200)
+            
+            # Clean up
+            widget.close_app()
+
+    def test_property_accessors(self):
+        """Test property accessors for compatibility"""
+        with patch.dict(os.environ, self.test_env):
+            widget, mock_root = self._create_mock_widget()
+            
+            # Mock the actual button
+            mock_button = MagicMock()
+            widget.toggle_btn = mock_button
+            
+            # Test start_button property
+            self.assertEqual(widget.start_button, mock_button)
+            
+            # Mock the actual combobox
+            mock_combo = MagicMock()
+            widget.project_combobox = mock_combo
+            
+            # Test project_combo property
+            self.assertEqual(widget.project_combo, mock_combo)
+            
+            # Clean up
+            widget.close_app()
+
+    def test_theme_edge_cases(self):
+        """Test theme edge cases and boundary conditions"""
+        with patch.dict(os.environ, self.test_env):
+            widget, mock_root = self._create_mock_widget()
+            
+            # Test cycling through all themes
+            for i in range(len(widget.themes) + 2):  # Go beyond the end
+                widget.cycle_theme()
+                expected_theme = (i + 1) % len(widget.themes)
+                self.assertEqual(widget.current_theme, expected_theme)
+            
+            # Clean up
+            widget.close_app()
+
+    def test_window_attributes(self):
+        """Test window attribute configuration"""
+        with patch.dict(os.environ, self.test_env):
+            widget, mock_root = self._create_mock_widget()
+            
+            # Verify window attributes were set
+            mock_root.title.assert_called()
+            mock_root.geometry.assert_called()
+            mock_root.configure.assert_called()
+            mock_root.overrideredirect.assert_called()
+            mock_root.attributes.assert_called()
+            mock_root.protocol.assert_called()
+            
+            # Clean up
+            widget.close_app()
+
+    def test_ui_component_creation(self):
+        """Test UI component creation during initialization"""
+        with patch.dict(os.environ, self.test_env):
+            with patch('tkinter.Tk') as mock_tk:
+                mock_root = MagicMock()
+                mock_tk.return_value = mock_root
+                
+                with patch('tkinter.Frame') as mock_frame, \
+                     patch('tkinter.Label') as mock_label, \
+                     patch('tkinter.Button') as mock_button, \
+                     patch('tkinter.ttk.Combobox') as mock_combo, \
+                     patch('tkinter.Canvas') as mock_canvas, \
+                     patch('tkinter.Scrollbar') as mock_scrollbar, \
+                     patch.object(TickTockWidget, 'run'):
+                    
+                    widget = TickTockWidget()
+                    
+                    # Verify UI components were created
+                    mock_frame.assert_called()
+                    mock_label.assert_called()
+                    mock_button.assert_called()
+                    mock_combo.assert_called()
+                    mock_canvas.assert_called()
+                    mock_scrollbar.assert_called()
+                    
+                    # Clean up
+                    widget.close_app()
+
+    def test_comprehensive_widget_lifecycle(self):
+        """Test complete widget lifecycle with all operations"""
+        with patch.dict(os.environ, self.test_env):
+            widget, mock_root = self._create_mock_widget()
+            
+            # Mock all UI components
+            widget.project_combo = MagicMock()
+            widget.sub_combo = MagicMock()
+            widget.toggle_btn = MagicMock()
+            
+            # Test complete lifecycle
+            # 1. Initialize (already done)
+            self.assertIsNotNone(widget)
+            
+            # 2. Start timing
+            widget.project_combo.get.return_value = "Test Project"
+            widget.sub_combo.get.return_value = "Sub Activity"
+            widget.toggle_timer()
+            self.assertTrue(widget.is_timing)
+            
+            # 3. Change theme
+            initial_theme = widget.current_theme
+            widget.cycle_theme()
+            self.assertNotEqual(widget.current_theme, initial_theme)
+            
+            # 4. Open management windows
+            with patch('tick_tock_widget.project_management.ProjectManagementWindow'):
+                widget.open_project_management()
+                self.assertIsNotNone(widget.project_mgmt_window)
+            
+            with patch('tick_tock_widget.monthly_report.MonthlyReportWindow'):
+                widget.open_monthly_report()
+                self.assertIsNotNone(widget.monthly_report_window)
+            
+            # 5. Minimize and restore
+            with patch('tick_tock_widget.minimized_widget.MinimizedTickTockWidget'):
+                widget.minimize_window()
+                self.assertIsNotNone(widget.minimized_widget)
+            
+            # 6. Stop timing
+            widget.toggle_timer()
+            self.assertFalse(widget.is_timing)
+            
+            # 7. Save data
+            widget.data_manager.save_projects = MagicMock()
+            widget.save_data()
+            widget.data_manager.save_projects.assert_called()
+            
+            # 8. Close application
+            widget.close_app()
+            mock_root.destroy.assert_called()
+
+
+if __name__ == '__main__':
+    unittest.main()

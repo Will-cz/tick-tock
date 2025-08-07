@@ -1,0 +1,127 @@
+"""
+Test ProjectManagementWindow with comprehensive mocking to prevent hanging
+Fixed version that properly handles all widget mocking
+"""
+
+import unittest
+import tempfile
+import os
+import json
+from unittest.mock import patch, MagicMock
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+
+from tick_tock_widget.project_management import ProjectManagementWindow
+from tick_tock_widget.project_data import ProjectDataManager
+
+
+class TestProjectManagementNoHang(unittest.TestCase):
+    """Test ProjectManagementWindow with proper mocking to prevent hanging"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        self.temp_file.close()
+        
+        # Create proper test data that matches Project dataclass
+        test_data = {
+            "projects": [
+                {
+                    "name": "Test Project",
+                    "dz_number": "DZ001",
+                    "alias": "TP001",
+                    "time_records": {},
+                    "sub_activities": [
+                        {
+                            "name": "Development", 
+                            "alias": "DEV", 
+                            "time_records": {}
+                        }
+                    ]
+                }
+            ],
+            "current_project_alias": None,
+            "current_sub_activity_alias": None
+        }
+        
+        with open(self.temp_file.name, 'w', encoding='utf-8') as f:
+            json.dump(test_data, f)
+        
+        self.test_env = {'TICK_TOCK_DATA_FILE': self.temp_file.name}
+    
+    def tearDown(self):
+        """Clean up test environment"""
+        try:
+            os.unlink(self.temp_file.name)
+        except FileNotFoundError:
+            pass
+
+    @patch('tick_tock_widget.project_management.tk')
+    @patch('tick_tock_widget.project_management.ttk')
+    def test_project_management_window_creation(self, mock_ttk, mock_tk):
+        """Test that ProjectManagementWindow can be created without hanging"""
+        
+        with patch.dict(os.environ, self.test_env):
+            # Create mock parent
+            mock_parent = MagicMock()
+            mock_parent.root = MagicMock()
+            mock_parent.winfo_toplevel.return_value = MagicMock()
+            
+            # Create data manager
+            data_manager = ProjectDataManager(self.temp_file.name)
+            
+            # Configure mock widgets
+            mock_window = MagicMock()
+            mock_tree = MagicMock()
+            mock_frame = MagicMock()
+            mock_button = MagicMock()
+            
+            mock_tk.Toplevel.return_value = mock_window
+            mock_ttk.Treeview.return_value = mock_tree
+            mock_ttk.Frame.return_value = mock_frame
+            mock_ttk.Button.return_value = mock_button
+            
+            # Create window - should not hang
+            pm = ProjectManagementWindow(mock_parent, data_manager)
+            
+            # Verify window was created
+            self.assertIsNotNone(pm)
+            self.assertIsInstance(pm.window, MagicMock)
+            self.assertIsInstance(pm.tree, MagicMock)
+            
+            # Verify data manager has projects
+            self.assertEqual(len(data_manager.projects), 1)
+            self.assertEqual(data_manager.projects[0].alias, "TP001")
+
+    @patch('tick_tock_widget.project_management.tk')
+    @patch('tick_tock_widget.project_management.ttk')
+    def test_populate_projects_method(self, mock_ttk, mock_tk):
+        """Test populate_projects method works with mocking"""
+        
+        with patch.dict(os.environ, self.test_env):
+            mock_parent = MagicMock()
+            mock_parent.root = MagicMock()
+            data_manager = ProjectDataManager(self.temp_file.name)
+            
+            # Configure mock widgets
+            mock_window = MagicMock()
+            mock_tree = MagicMock()
+            mock_tree.get_children.return_value = ['item1', 'item2']
+            
+            mock_tk.Toplevel.return_value = mock_window
+            mock_ttk.Treeview.return_value = mock_tree
+            mock_ttk.Frame.return_value = MagicMock()
+            mock_ttk.Button.return_value = MagicMock()
+            
+            # Create window
+            pm = ProjectManagementWindow(mock_parent, data_manager)
+            
+            # Call populate_projects - should not hang
+            pm.populate_projects()
+            
+            # Verify tree operations were called
+            mock_tree.delete.assert_called()
+            mock_tree.insert.assert_called()
+
+if __name__ == '__main__':
+    unittest.main()

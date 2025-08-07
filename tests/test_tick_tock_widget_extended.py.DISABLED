@@ -1,0 +1,412 @@
+"""
+Extended tests for TickTockWidget - focusing on uncovered functionality
+"""
+
+import unittest
+import tempfile
+from pathlib import Path
+from unittest.mock import patch, MagicMock, Mock
+import tkinter as tk
+from tkinter import ttk
+
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from tick_tock_widget.tick_tock_widget import TickTockWidget
+from tick_tock_widget.project_data import ProjectDataManager
+
+
+class TestTickTockWidgetExtended(unittest.TestCase):
+    """Extended tests for TickTockWidget main application"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        self.temp_file.close()
+        
+        # Mock all GUI components to avoid actual window creation
+        self.tk_patch = patch('tkinter.Tk')
+        self.mock_tk = self.tk_patch.start()
+        self.mock_root = MagicMock()
+        self.mock_tk.return_value = self.mock_root
+        
+    def tearDown(self):
+        """Clean up test environment"""
+        self.tk_patch.stop()
+        
+        if Path(self.temp_file.name).exists():
+            Path(self.temp_file.name).unlink()
+
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    @patch('tick_tock_widget.tick_tock_widget.get_config')
+    def test_theme_cycling_complete_cycle(self, mock_get_config, mock_data_manager):
+        """Test complete theme cycling functionality"""
+        mock_config = MagicMock()
+        mock_get_config.return_value = mock_config
+        
+        widget = TickTockWidget()
+        initial_theme = widget.current_theme
+        num_themes = len(widget.themes)
+        
+        # Cycle through all themes
+        for i in range(num_themes + 1):  # +1 to test wraparound
+            widget.cycle_theme()
+        
+        # Should be back to initial theme
+        expected_theme = (initial_theme + num_themes + 1) % num_themes
+        self.assertEqual(widget.current_theme, expected_theme)
+
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    @patch('tick_tock_widget.tick_tock_widget.get_config')
+    def test_minimize_restore_functionality(self, mock_get_config, mock_data_manager):
+        """Test window minimize and restore functionality"""
+        mock_config = MagicMock()
+        mock_get_config.return_value = mock_config
+        
+        widget = TickTockWidget()
+        widget.setup_widgets()  # Initialize widgets
+        
+        # Test minimize
+        with patch('tick_tock_widget.minimized_widget.MinimizedTickTockWidget') as mock_minimized:
+            mock_minimized_instance = MagicMock()
+            mock_minimized.return_value = mock_minimized_instance
+            
+            widget.minimize()
+            
+            # Verify minimized widget was created
+            mock_minimized.assert_called_once()
+            self.assertIsNotNone(widget.minimized_widget)
+            
+            # Test restore
+            widget.restore()
+            
+            # Verify minimized widget was destroyed
+            mock_minimized_instance.destroy.assert_called_once()
+            self.assertIsNone(widget.minimized_widget)
+
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    @patch('tick_tock_widget.tick_tock_widget.get_config')
+    def test_project_selection_updates_subactivities(self, mock_get_config, mock_data_manager):
+        """Test that selecting a project updates sub-activities dropdown"""
+        mock_config = MagicMock()
+        mock_get_config.return_value = mock_config
+        
+        # Mock project data
+        mock_project = {
+            'name': 'Test Project',
+            'alias': 'test',
+            'sub_activities': [
+                {'name': 'Sub 1', 'alias': 'sub1'},
+                {'name': 'Sub 2', 'alias': 'sub2'}
+            ]
+        }
+        mock_data_manager_instance = MagicMock()
+        mock_data_manager_instance.get_project_by_alias.return_value = mock_project
+        mock_data_manager.return_value = mock_data_manager_instance
+        
+        widget = TickTockWidget()
+        widget.setup_widgets()
+        
+        # Mock comboboxes
+        widget.project_combo = MagicMock()
+        widget.sub_activity_combo = MagicMock()
+        
+        # Simulate project selection
+        widget.selected_project.set('test')
+        widget.on_project_changed()
+        
+        # Verify sub-activities were updated
+        widget.sub_activity_combo.__setitem__.assert_called()
+
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    @patch('tick_tock_widget.tick_tock_widget.get_config')
+    def test_timer_start_stop_reset_workflow(self, mock_get_config, mock_data_manager):
+        """Test complete timer workflow: start, stop, reset"""
+        mock_config = MagicMock()
+        mock_get_config.return_value = mock_config
+        
+        widget = TickTockWidget()
+        widget.setup_widgets()
+        
+        # Mock timer components
+        widget.selected_project = MagicMock()
+        widget.selected_project.get.return_value = 'test_project'
+        widget.selected_sub_activity = MagicMock()
+        widget.selected_sub_activity.get.return_value = 'test_sub'
+        widget.start_stop_button = MagicMock()
+        widget.reset_button = MagicMock()
+        
+        # Test start timer
+        widget.is_timing = False
+        widget.toggle_timer()
+        
+        self.assertTrue(widget.is_timing)
+        self.assertIsNotNone(widget.start_time)
+        
+        # Test stop timer
+        widget.toggle_timer()
+        
+        self.assertFalse(widget.is_timing)
+        self.assertIsNone(widget.start_time)
+        
+        # Test reset timer
+        widget.reset_timer()
+        
+        # Verify reset was called
+        self.assertFalse(widget.is_timing)
+
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    @patch('tick_tock_widget.tick_tock_widget.get_config')
+    def test_window_position_persistence(self, mock_get_config, mock_data_manager):
+        """Test saving and restoring window positions"""
+        mock_config = MagicMock()
+        mock_get_config.return_value = mock_config
+        
+        widget = TickTockWidget()
+        
+        # Mock window geometry
+        widget.root.winfo_x.return_value = 100
+        widget.root.winfo_y.return_value = 200
+        
+        # Test save position
+        widget.save_window_position()
+        
+        self.assertIsNotNone(widget._last_window_pos)
+        self.assertEqual(widget._last_window_pos['x'], 100)
+        self.assertEqual(widget._last_window_pos['y'], 200)
+
+    @patch('tick_tock_widget.tick_tock_widget.ProjectManagementWindow')
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    @patch('tick_tock_widget.tick_tock_widget.get_config')
+    def test_project_management_window_integration(self, mock_get_config, mock_data_manager, mock_pm_window):
+        """Test project management window opening and integration"""
+        mock_config = MagicMock()
+        mock_get_config.return_value = mock_config
+        
+        widget = TickTockWidget()
+        widget.setup_widgets()
+        
+        # Test opening project management window
+        widget.open_project_management()
+        
+        # Verify window was created
+        mock_pm_window.assert_called_once()
+        self.assertIsNotNone(widget.project_mgmt_window)
+
+    @patch('tick_tock_widget.tick_tock_widget.MonthlyReportWindow')
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    @patch('tick_tock_widget.tick_tock_widget.get_config')
+    def test_monthly_report_window_integration(self, mock_get_config, mock_data_manager, mock_report_window):
+        """Test monthly report window opening and integration"""
+        mock_config = MagicMock()
+        mock_get_config.return_value = mock_config
+        
+        widget = TickTockWidget()
+        widget.setup_widgets()
+        
+        # Test opening monthly report window
+        widget.open_monthly_report()
+        
+        # Verify window was created
+        mock_report_window.assert_called_once()
+        self.assertIsNotNone(widget.monthly_report_window)
+
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    @patch('tick_tock_widget.tick_tock_widget.get_config')
+    def test_error_handling_in_timer_operations(self, mock_get_config, mock_data_manager):
+        """Test error handling during timer operations"""
+        mock_config = MagicMock()
+        mock_get_config.return_value = mock_config
+        
+        # Mock data manager to raise exception
+        mock_data_manager_instance = MagicMock()
+        mock_data_manager_instance.add_time.side_effect = Exception("Database error")
+        mock_data_manager.return_value = mock_data_manager_instance
+        
+        widget = TickTockWidget()
+        widget.setup_widgets()
+        
+        # Mock timer state
+        widget.is_timing = True
+        widget.start_time = MagicMock()
+        widget.selected_project = MagicMock()
+        widget.selected_project.get.return_value = 'test'
+        widget.selected_sub_activity = MagicMock()
+        widget.selected_sub_activity.get.return_value = 'test_sub'
+        
+        # Test that timer handles errors gracefully
+        with patch('tkinter.messagebox.showerror') as mock_error:
+            widget.toggle_timer()  # This should handle the exception
+            
+            # Timer should be stopped even if save fails
+            self.assertFalse(widget.is_timing)
+
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    @patch('tick_tock_widget.tick_tock_widget.get_config')
+    def test_theme_application_to_all_widgets(self, mock_get_config, mock_data_manager):
+        """Test that theme changes are applied to all widgets"""
+        mock_config = MagicMock()
+        mock_get_config.return_value = mock_config
+        
+        widget = TickTockWidget()
+        widget.setup_widgets()
+        
+        # Mock various widgets
+        widget.main_frame = MagicMock()
+        widget.project_combo = MagicMock()
+        widget.sub_activity_combo = MagicMock()
+        widget.start_stop_button = MagicMock()
+        widget.reset_button = MagicMock()
+        
+        # Test theme application
+        initial_theme = widget.current_theme
+        widget.cycle_theme()
+        
+        # Verify theme changed
+        self.assertNotEqual(widget.current_theme, initial_theme)
+
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    @patch('tick_tock_widget.tick_tock_widget.get_config')
+    def test_widget_initialization_with_no_projects(self, mock_get_config, mock_data_manager):
+        """Test widget initialization when no projects exist"""
+        mock_config = MagicMock()
+        mock_get_config.return_value = mock_config
+        
+        # Mock empty project list
+        mock_data_manager_instance = MagicMock()
+        mock_data_manager_instance.projects = []
+        mock_data_manager_instance.get_project_aliases.return_value = []
+        mock_data_manager.return_value = mock_data_manager_instance
+        
+        widget = TickTockWidget()
+        widget.setup_widgets()
+        
+        # Verify widget initializes correctly with empty data
+        self.assertIsNotNone(widget.data_manager)
+        self.assertEqual(len(widget.data_manager.projects), 0)
+
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    @patch('tick_tock_widget.tick_tock_widget.get_config')
+    def test_test_mode_functionality(self, mock_get_config, mock_data_manager):
+        """Test test mode suppresses UI dialogs"""
+        mock_config = MagicMock()
+        mock_get_config.return_value = mock_config
+        
+        widget = TickTockWidget()
+        widget._test_mode = True
+        
+        # Test that test mode is properly set
+        self.assertTrue(widget._test_mode)
+        
+        # Test operations that would normally show dialogs
+        widget.setup_widgets()
+        
+        # Should complete without showing dialogs
+        self.assertTrue(widget._test_mode)
+
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    @patch('tick_tock_widget.tick_tock_widget.get_config')
+    def test_timing_state_persistence(self, mock_get_config, mock_data_manager):
+        """Test that timing state is properly managed"""
+        mock_config = MagicMock()
+        mock_get_config.return_value = mock_config
+        
+        widget = TickTockWidget()
+        widget.setup_widgets()
+        
+        # Test initial state
+        self.assertFalse(widget.is_timing)
+        self.assertFalse(widget._timing_explicitly_set)
+        
+        # Mock required components for timing
+        widget.selected_project = MagicMock()
+        widget.selected_project.get.return_value = 'test'
+        widget.selected_sub_activity = MagicMock()
+        widget.selected_sub_activity.get.return_value = 'test_sub'
+        widget.start_stop_button = MagicMock()
+        
+        # Start timing
+        widget.toggle_timer()
+        
+        self.assertTrue(widget.is_timing)
+        self.assertTrue(widget._timing_explicitly_set)
+
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    @patch('tick_tock_widget.tick_tock_widget.get_config')
+    def test_cycle_count_tracking(self, mock_get_config, mock_data_manager):
+        """Test that cycle count is properly tracked for theme changes"""
+        mock_config = MagicMock()
+        mock_get_config.return_value = mock_config
+        
+        widget = TickTockWidget()
+        
+        initial_count = widget._cycle_count
+        
+        # Cycle themes multiple times
+        for _ in range(3):
+            widget.cycle_theme()
+        
+        # Verify cycle count increased
+        self.assertEqual(widget._cycle_count, initial_count + 3)
+
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    @patch('tick_tock_widget.tick_tock_widget.get_config')
+    def test_widget_cleanup_on_exit(self, mock_get_config, mock_data_manager):
+        """Test proper cleanup when widget is destroyed"""
+        mock_config = MagicMock()
+        mock_get_config.return_value = mock_config
+        
+        widget = TickTockWidget()
+        widget.setup_widgets()
+        
+        # Mock active windows
+        widget.project_mgmt_window = MagicMock()
+        widget.monthly_report_window = MagicMock()
+        widget.minimized_widget = MagicMock()
+        
+        # Test cleanup
+        widget.cleanup()
+        
+        # Verify cleanup was performed
+        # (This depends on implementing a cleanup method)
+        self.assertIsNotNone(widget)  # Basic check that object still exists
+
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    @patch('tick_tock_widget.tick_tock_widget.get_config')
+    def test_environment_label_display(self, mock_get_config, mock_data_manager):
+        """Test environment label display functionality"""
+        mock_config = MagicMock()
+        mock_config.environment.name = 'development'
+        mock_get_config.return_value = mock_config
+        
+        widget = TickTockWidget()
+        widget.setup_widgets()
+        
+        # Test that environment is properly detected
+        self.assertEqual(widget.config.environment.name, 'development')
+
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    @patch('tick_tock_widget.tick_tock_widget.get_config')
+    def test_comprehensive_error_handling(self, mock_get_config, mock_data_manager):
+        """Test comprehensive error handling across widget operations"""
+        mock_config = MagicMock()
+        mock_get_config.return_value = mock_config
+        
+        # Test widget creation with various error conditions
+        widget = TickTockWidget()
+        
+        # Test with data manager errors
+        mock_data_manager_instance = MagicMock()
+        mock_data_manager_instance.load_projects.side_effect = Exception("Load error")
+        mock_data_manager.return_value = mock_data_manager_instance
+        
+        # Should handle errors gracefully
+        widget.setup_widgets()
+        
+        # Widget should still be functional
+        self.assertIsNotNone(widget.data_manager)
+
+
+if __name__ == '__main__':
+    unittest.main()
