@@ -1,0 +1,29 @@
+# Tick-Tock Widget Requirements
+# 
+# This project uses only Python standard library for core functionality.
+# The main application has no external dependencies and runs with just Python 3.8+
+#
+# Runtime Dependencies: NONE (uses only Python standard library)
+# - tkinter (included with Python)
+# - json (included with Python) 
+# - datetime (included with Python)
+# - pathlib (included with Python)
+# - os, sys, subprocess, etc. (all standard library)
+
+# Essential Development Dependencies
+# Install with: pip install -r requirements.txt
+
+# Testing Framework
+pytest>=7.4.0
+pytest-cov>=4.0.0
+pytest-mock>=3.10.0
+
+# Code Quality
+black>=23.0.0
+flake8>=6.0.0
+
+# For additional development tools, use:
+# pip install -r requirements-dev.txt
+# 
+# For build-only requirements, use:
+# pip install -r requirements-build.txt

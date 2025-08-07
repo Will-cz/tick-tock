@@ -1,0 +1,58 @@
+{
+  "environment": "prototype",
+  "data_files": {
+    "development": "user_data/tick_tock_projects_dev.json",
+    "production": "user_data/tick_tock_projects.json",
+    "test": "user_data/tick_tock_projects_test.json",
+    "prototype": "user_data/tick_tock_projects_prototype.json"
+  },
+  "environment_display": {
+    "development": {
+      "window_title": "Tick-Tock Widget [DEV]",
+      "title_color": "#00FF00",
+      "border_color": "#004400"
+    },
+    "production": {
+      "window_title": "Tick-Tock Widget",
+      "title_color": "#FFFFFF",
+      "border_color": "#444444"
+    },
+    "test": {
+      "window_title": "Tick-Tock Widget [TEST]",
+      "title_color": "#FFFF00",
+      "border_color": "#444400"
+    },
+    "prototype": {
+      "window_title": "Tick-Tock Widget [LEGACY PROTOTYPE]",
+      "title_color": "#FF8800",
+      "border_color": "#663300"
+    }
+  },
+  "auto_save_interval": 300,
+  "backup_enabled": true,
+  "backup_directory": "user_data/backups",
+  "max_backups": 10,
+  "debug_mode": false,
+  "ui_settings": {
+    "tree_states": {
+      "project_management": {
+        "project_Project 1": 0,
+        "project_Project 2": 0,
+        "project_Project 3": 1,
+        "project_Project 4": 0,
+        "project_Project 5": 0,
+        "project_Project 6": 0,
+        "project_Project 7": 1
+      },
+      "monthly_report": {
+        "project_Project 1": 1,
+        "project_Project 2": 1,
+        "project_Project 3": 1,
+        "project_Project 4": 0,
+        "project_Project 5": 0,
+        "project_Project 6": 0,
+        "project_Project 7": 0
+      }
+    }
+  }
+}
