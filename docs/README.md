@@ -32,6 +32,8 @@
 ### 🔄 Process & Strategy (`/process/`)
 *Project Management & Development Process*
 
+- **[phase-2-planning-roadmap.md](process/phase-2-planning-roadmap.md)** - Phase 2 planning roadmap and completion verification
+- **[phase-3-implementation-roadmap.md](process/phase-3-implementation-roadmap.md)** - Step-by-step implementation guide for Phase 3 development
 - **[git-github-strategy.md](process/git-github-strategy.md)** - Git workflow and GitHub collaboration strategy
 
 ---
@@ -69,10 +71,11 @@ Development workflow and collaboration guidelines:
 4. Read **[git-github-strategy.md](process/git-github-strategy.md)** - Understand development workflow
 
 ### For Implementation
-1. **[dependency-mapping.md](planning/dependency-mapping.md)** - Implementation order
-2. **[api-specification.md](technical/api-specification.md)** - Component interfaces
-3. **[testing-strategy.md](technical/testing-strategy.md)** - Quality assurance approach
-4. **[acceptance-criteria.md](planning/acceptance-criteria.md)** - Definition of done
+1. **[phase-3-implementation-roadmap.md](process/phase-3-implementation-roadmap.md)** - Weekly development plan and daily checklists
+2. **[dependency-mapping.md](planning/dependency-mapping.md)** - Implementation order
+3. **[api-specification.md](technical/api-specification.md)** - Component interfaces
+4. **[testing-strategy.md](technical/testing-strategy.md)** - Quality assurance approach
+5. **[acceptance-criteria.md](planning/acceptance-criteria.md)** - Definition of done
 
 ### For Quality Assurance
 1. **[acceptance-criteria.md](planning/acceptance-criteria.md)** - Testable requirements

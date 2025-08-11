@@ -14,7 +14,7 @@ This folder contains comprehensive planning documents created to address gaps id
 
 ---
 
-## 📋 Document List & Purpose
+## 📋 Document List & Purpose (13 Documents)
 
 ### **Core Planning Documents**
 
@@ -53,24 +53,36 @@ This folder contains comprehensive planning documents created to address gaps id
    - **Critical For**: Clear definition of "done", quality assurance
    - **Use When**: Development planning, testing, feature validation
 
+### **Process & Strategy Documents**
+
+8. **[phase-2-planning-roadmap.md](./docs/process/phase-2-planning-roadmap.md)**
+   - **Purpose**: Phase 2 planning roadmap and completion verification
+   - **Critical For**: Ensuring Phase 2 completeness, Phase 3 readiness validation
+   - **Use When**: Completing Phase 2, preparing for Phase 3 transition
+
+9. **[phase-3-implementation-roadmap.md](./docs/process/phase-3-implementation-roadmap.md)**
+   - **Purpose**: Step-by-step implementation guide for Phase 3 development
+   - **Critical For**: Daily development guidance, progress tracking, quality gates
+   - **Use When**: Starting Phase 3, daily standups, weekly reviews, milestone tracking
+
 ### **Technical Implementation Documents**
 
-8. **[technical-architecture.md](./docs/technical/technical-architecture.md)**
+10. **[technical-architecture.md](./docs/technical/technical-architecture.md)**
    - **Purpose**: Detailed system architecture and technical specifications
    - **Critical For**: Development implementation, component design, system understanding
    - **Use When**: Code development, system design decisions, technical reviews
 
-9. **[api-specification.md](./docs/technical/api-specification.md)**
+11. **[api-specification.md](./docs/technical/api-specification.md)**
    - **Purpose**: Internal API contracts and data model definitions
    - **Critical For**: Component communication, data consistency, integration testing
    - **Use When**: Interface design, data structure planning, API development
 
-10. **[testing-strategy.md](./docs/technical/testing-strategy.md)**
+12. **[testing-strategy.md](./docs/technical/testing-strategy.md)**
    - **Purpose**: Comprehensive testing approach and quality assurance plan
    - **Critical For**: Code quality, bug prevention, release confidence
    - **Use When**: Test planning, quality validation, release preparation
 
-11. **[security-model.md](./docs/technical/security-model.md)**
+13. **[security-model.md](./docs/technical/security-model.md)**
    - **Purpose**: Security threats, data protection, and defensive measures
    - **Critical For**: Data privacy, system security, vulnerability prevention
    - **Use When**: Security implementation, threat assessment, compliance validation
