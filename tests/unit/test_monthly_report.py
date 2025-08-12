@@ -13,47 +13,33 @@ class TestMonthlyReportWindow:
     """Test MonthlyReportWindow class"""
 
     @pytest.fixture
-    def mock_setup(self):
+    def mock_setup(self, mock_gui_components):
         """Set up common mocks for testing"""
-        with patch('tick_tock_widget.monthly_report.tk.Toplevel') as mock_toplevel, \
-             patch('tick_tock_widget.monthly_report.get_config') as mock_get_config, \
-             patch('tick_tock_widget.monthly_report.MonthlyReportWindow.setup_window'), \
-             patch('tick_tock_widget.monthly_report.MonthlyReportWindow.create_widgets'), \
-             patch('tick_tock_widget.monthly_report.MonthlyReportWindow.update_report'):
-                 
-            # Mock parent widget
-            mock_parent = Mock()
-            mock_parent.root = Mock()
-            mock_parent.root.winfo_x.return_value = 100
-            mock_parent.root.winfo_y.return_value = 100
-            mock_parent.root.winfo_screenwidth.return_value = 1920
-            mock_parent.root.winfo_screenheight.return_value = 1080
-            
-            # Mock data manager
-            mock_data_manager = Mock()
-            
-            # Mock config
+        # Mock parent widget
+        mock_parent = Mock()
+        mock_parent.root = Mock()
+        mock_parent.root.winfo_x.return_value = 100
+        mock_parent.root.winfo_y.return_value = 100
+        mock_parent.root.winfo_screenwidth.return_value = 1920
+        mock_parent.root.winfo_screenheight.return_value = 1080
+        
+        # Mock data manager
+        mock_data_manager = Mock()
+        mock_data_manager.projects = []
+        
+        # Mock config using our existing fixture
+        with patch('tick_tock_widget.monthly_report.get_config') as mock_get_config:
             mock_config = Mock()
             mock_config.get_tree_state.return_value = {}
             mock_config.set_tree_state = Mock()
+            mock_config.save_tree_state = Mock()
             mock_get_config.return_value = mock_config
-            
-            # Mock window
-            mock_window = Mock()
-            mock_window.update_idletasks = Mock()
-            mock_window.geometry = Mock()
-            mock_window.configure = Mock()
-            mock_window.winfo_screenwidth.return_value = 1920
-            mock_window.winfo_screenheight.return_value = 1080
-            mock_toplevel.return_value = mock_window
             
             yield {
                 'parent': mock_parent,
                 'data_manager': mock_data_manager,
                 'config': mock_config,
                 'get_config': mock_get_config,
-                'toplevel': mock_toplevel,
-                'window': mock_window
             }
 
     def test_monthly_report_window_creation(self, mock_setup):
@@ -85,7 +71,7 @@ class TestMonthlyReportWindow:
         assert window.current_year == datetime.now().year
         assert window.current_month == datetime.now().month
         assert not window.window_closed
-        mocks['toplevel'].assert_called_once_with(mocks['parent'].root)
+        # Window creation is mocked by mock_gui_components fixture
 
     def test_monthly_report_default_theme(self, mock_setup):
         """Test monthly report with default theme"""

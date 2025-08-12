@@ -8,6 +8,7 @@ import os
 import sys
 import json
 import shutil
+import platform
 from pathlib import Path
 from typing import Any, Optional
 from enum import Enum
@@ -90,8 +91,6 @@ class Config:
 
     def _get_user_data_directory(self) -> Path:
         """Get the appropriate user data directory based on the operating system"""
-        import platform
-        
         system = platform.system()
         if system == "Windows":
             # Use LOCALAPPDATA for Windows
@@ -318,6 +317,10 @@ class Config:
         
         self.config["ui_settings"]["tree_states"][window_type] = tree_state.copy()
         self.save_config()
+
+    def set_tree_state(self, window_type: str, tree_state: dict[str, bool]) -> None:
+        """Alias for save_tree_state - maintains compatibility"""
+        self.save_tree_state(window_type, tree_state)
 
     def clear_tree_state(self, window_type: str) -> None:
         """Clear tree state for a specific window type"""

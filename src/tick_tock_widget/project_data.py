@@ -298,8 +298,15 @@ class ProjectDataManager:
             # Update data file path
             self.data_file = Path(self.config.get_data_file())
 
-            # Reload data from new environment
+            # Reload data from new environment, or start fresh if no data
             success = self.load_projects()
+            
+            # If no data file exists, that's ok - we're starting fresh
+            if not success and not self.data_file.exists():
+                self.projects = []
+                self.current_project_alias = None
+                self.current_sub_activity_alias = None
+                success = True
 
             print(f"🔄 Switched to {environment.value} environment")
             return success

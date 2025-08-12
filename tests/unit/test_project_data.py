@@ -496,7 +496,16 @@ class TestProjectDataManager:
     
     def test_add_project(self):
         """Test adding a new project"""
-        with patch('tick_tock_widget.project_data.get_config'):
+        with patch('tick_tock_widget.project_data.get_config') as mock_get_config:
+            # Configure the mock config
+            mock_config = Mock()
+            mock_config.get_data_file.return_value = "test_data.json"
+            mock_config.get_auto_save_interval.return_value = 300
+            mock_config.is_backup_enabled.return_value = True
+            mock_config.get_backup_directory.return_value = "backups"
+            mock_config.get_max_backups.return_value = 10
+            mock_get_config.return_value = mock_config
+            
             with patch.object(ProjectDataManager, 'load_projects', return_value=True):
                 manager = ProjectDataManager()
                 
@@ -511,7 +520,16 @@ class TestProjectDataManager:
     
     def test_add_project_duplicate_alias(self):
         """Test adding project with duplicate alias"""
-        with patch('tick_tock_widget.project_data.get_config'):
+        with patch('tick_tock_widget.project_data.get_config') as mock_get_config:
+            # Configure the mock config
+            mock_config = Mock()
+            mock_config.get_data_file.return_value = "test_data.json"
+            mock_config.get_auto_save_interval.return_value = 300
+            mock_config.is_backup_enabled.return_value = True
+            mock_config.get_backup_directory.return_value = "backups"
+            mock_config.get_max_backups.return_value = 10
+            mock_get_config.return_value = mock_config
+            
             with patch.object(ProjectDataManager, 'load_projects', return_value=True):
                 manager = ProjectDataManager()
                 
@@ -524,82 +542,76 @@ class TestProjectDataManager:
                 assert result is None
                 assert len(manager.projects) == 1
     
-    def test_remove_project(self):
+    def test_remove_project(self, mock_get_config):
         """Test removing a project"""
-        with patch('tick_tock_widget.project_data.get_config'):
-            with patch.object(ProjectDataManager, 'load_projects', return_value=True):
-                manager = ProjectDataManager()
-                
-                # Add a project
-                project = manager.add_project("Test", "DZ123", "T")
-                assert len(manager.projects) == 1
-                
-                # Remove the project
-                result = manager.remove_project("T")
-                
-                assert result is True
-                assert len(manager.projects) == 0
+        with patch.object(ProjectDataManager, 'load_projects', return_value=True):
+            manager = ProjectDataManager()
+            
+            # Add a project
+            project = manager.add_project("Test", "DZ123", "T")
+            assert len(manager.projects) == 1
+            
+            # Remove the project
+            result = manager.remove_project("T")
+            
+            assert result is True
+            assert len(manager.projects) == 0
     
-    def test_remove_project_not_found(self):
+    def test_remove_project_not_found(self, mock_get_config):
         """Test removing non-existent project"""
-        with patch('tick_tock_widget.project_data.get_config'):
-            with patch.object(ProjectDataManager, 'load_projects', return_value=True):
-                manager = ProjectDataManager()
-                
-                result = manager.remove_project("nonexistent")
-                
-                assert result is False
+        with patch.object(ProjectDataManager, 'load_projects', return_value=True):
+            manager = ProjectDataManager()
+            
+            result = manager.remove_project("nonexistent")
+            
+            assert result is False
     
-    def test_get_project(self):
+    def test_get_project(self, mock_get_config):
         """Test getting project by alias"""
-        with patch('tick_tock_widget.project_data.get_config'):
-            with patch.object(ProjectDataManager, 'load_projects', return_value=True):
-                manager = ProjectDataManager()
-                
-                project = manager.add_project("Test", "DZ123", "T")
-                
-                result = manager.get_project("T")
-                assert result is project
-                
-                result = manager.get_project("NONEXISTENT")
-                assert result is None
+        with patch.object(ProjectDataManager, 'load_projects', return_value=True):
+            manager = ProjectDataManager()
+            
+            project = manager.add_project("Test", "DZ123", "T")
+            
+            result = manager.get_project("T")
+            assert result is project
+            
+            result = manager.get_project("NONEXISTENT")
+            assert result is None
     
-    def test_set_current_project(self):
+    def test_set_current_project(self, mock_get_config):
         """Test setting current project"""
-        with patch('tick_tock_widget.project_data.get_config'):
-            with patch.object(ProjectDataManager, 'load_projects', return_value=True):
-                manager = ProjectDataManager()
-                
-                project = manager.add_project("Test", "DZ123", "T")
-                
-                result = manager.set_current_project("T")
-                assert result is True
-                assert manager.current_project_alias == "T"
-                assert manager.current_sub_activity_alias is None  # Should reset
-                
-                result = manager.set_current_project("NONEXISTENT")
-                assert result is False
+        with patch.object(ProjectDataManager, 'load_projects', return_value=True):
+            manager = ProjectDataManager()
+            
+            project = manager.add_project("Test", "DZ123", "T")
+            
+            result = manager.set_current_project("T")
+            assert result is True
+            assert manager.current_project_alias == "T"
+            assert manager.current_sub_activity_alias is None  # Should reset
+            
+            result = manager.set_current_project("NONEXISTENT")
+            assert result is False
     
-    def test_get_current_project(self):
+    def test_get_current_project(self, mock_get_config):
         """Test getting current project"""
-        with patch('tick_tock_widget.project_data.get_config'):
-            with patch.object(ProjectDataManager, 'load_projects', return_value=True):
-                manager = ProjectDataManager()
-                
-                project = manager.add_project("Test", "DZ123", "T")
-                manager.set_current_project("T")
-                
-                result = manager.get_current_project()
-                assert result is project
-                
-                manager.current_project_alias = None
-                result = manager.get_current_project()
-                assert result is None
+        with patch.object(ProjectDataManager, 'load_projects', return_value=True):
+            manager = ProjectDataManager()
+            
+            project = manager.add_project("Test", "DZ123", "T")
+            manager.set_current_project("T")
+            
+            result = manager.get_current_project()
+            assert result is project
+            
+            manager.current_project_alias = None
+            result = manager.get_current_project()
+            assert result is None
     
-    def test_start_stop_timers(self):
+    def test_start_stop_timers(self, mock_get_config):
         """Test starting and stopping timers"""
-        with patch('tick_tock_widget.project_data.get_config'), \
-             patch('tick_tock_widget.project_data.date') as mock_date:
+        with patch('tick_tock_widget.project_data.date') as mock_date:
             
             mock_date.today.return_value = date(2025, 8, 13)
             

@@ -1,5 +1,5 @@
 {
-  "environment": "prototype",
+  "environment": "development",
   "data_files": {
     "development": "user_data/tick_tock_projects_dev.json",
     "production": "user_data/tick_tock_projects.json",
@@ -36,7 +36,7 @@
   "ui_settings": {
     "tree_states": {
       "project_management": {
-        "project_Project 1": 0,
+        "project_Project 1": 1,
         "project_Project 2": 0,
         "project_Project 3": 1,
         "project_Project 4": 0,

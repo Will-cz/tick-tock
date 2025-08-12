@@ -73,7 +73,7 @@ class TestConfig:
             json.dump(custom_config, f)
         
         with patch('tick_tock_widget.config.Path.__new__') as mock_path, \
-             patch('tick_tock_widget.config.sys.frozen', False):
+             patch('tick_tock_widget.config.sys', frozen=False, create=True):
             
             mock_path.return_value.parent = temp_config_dir
             mock_path.return_value.__truediv__ = lambda self, other: temp_config_dir / other

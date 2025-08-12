@@ -313,7 +313,7 @@ class TestConfigIntegration:
     def test_config_environment_data_file_mapping(self, temp_config_dir):
         """Test config correctly maps environments to data files"""
         config_file = temp_config_dir / "config.json"
-        
+
         # Create config with custom data file mapping
         custom_config = {
             "environment": Environment.DEVELOPMENT.value,
@@ -327,23 +327,18 @@ class TestConfigIntegration:
         with open(config_file, 'w') as f:
             json.dump(custom_config, f)
         
-        with patch('tick_tock_widget.config.Path.__new__') as mock_path, \
-             patch('tick_tock_widget.config.sys.frozen', False):
-            
-            mock_path.return_value.parent = temp_config_dir
-            mock_path.return_value.__truediv__ = lambda self, other: temp_config_dir / other
-            
-            config = Config(config_file="config.json")
-            
-            # Test development environment
-            assert config.get_environment() == Environment.DEVELOPMENT
-            data_file = config.get_data_file()
-            assert data_file.endswith("custom_dev.json")
-            
-            # Switch to production
-            config.set_environment(Environment.PRODUCTION)
-            data_file = config.get_data_file()
-            assert data_file.endswith("custom_prod.json")
+        # Use full config file path instead of complex mocking
+        config = Config(config_file=str(config_file))
+        
+        # Test development environment
+        assert config.get_environment() == Environment.DEVELOPMENT
+        data_file = config.get_data_file()
+        assert data_file.endswith("custom_dev.json")
+        
+        # Switch to production
+        config.set_environment(Environment.PRODUCTION)
+        data_file = config.get_data_file()
+        assert data_file.endswith("custom_prod.json")
     
     def test_backup_system_integration(self, temp_config_dir):
         """Test backup system creates and manages backups correctly"""
@@ -390,7 +385,7 @@ class TestConfigIntegration:
         config_file = temp_config_dir / "ui_test.json"
         
         with patch('tick_tock_widget.config.Path.__new__') as mock_path, \
-             patch('tick_tock_widget.config.sys.frozen', False):
+             patch('sys.frozen', False, create=True):
             
             mock_path.return_value.parent = temp_config_dir
             mock_path.return_value.__truediv__ = lambda self, other: temp_config_dir / other

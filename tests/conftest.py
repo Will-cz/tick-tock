@@ -34,11 +34,26 @@ class MockTkRoot:
         self.y = 100
         self.width = 400
         self.height = 300
+        self._last_child_ids = {}
+        self.tk = self  # Mock tk attribute
         
-    def geometry(self, geom=None):
-        if geom:
-            self.geometry_value = geom
-        return self.geometry_value
+        # Make these Mock objects so tests can assert calls
+        self.withdraw = Mock()
+        self.deiconify = Mock()
+        self.option_add = Mock()
+        self.geometry = Mock(return_value="400x300+100+100")
+        
+    def winfo_x(self):
+        return self.x
+        
+    def winfo_y(self):
+        return self.y
+        
+    def winfo_width(self):
+        return self.width
+        
+    def winfo_height(self):
+        return self.height
         
     def title(self, title=None):
         if title:
@@ -69,6 +84,15 @@ class MockTkRoot:
     def winfo_height(self):
         return self.height
         
+    def winfo_screenwidth(self):
+        return 1920
+        
+    def winfo_screenheight(self):
+        return 1080
+        
+    def update_idletasks(self):
+        pass
+        
     def winfo_exists(self):
         return not self.destroyed
         
@@ -98,12 +122,30 @@ class MockWidget:
     def __init__(self, master=None, **kwargs):
         self.master = master
         self.config_values = kwargs
-        self.children = []
+        self.children = {}  # Must be dict for tkinter compatibility
         self.pack_info_value = {}
         self.destroyed = False
+        self._selection = []
+        self.tk = self  # Add tk attribute for MockWidget
+        self._last_child_ids = {}  # Add _last_child_ids for tkinter compatibility
+        self._w = f".widget_{id(self)}"  # Mock widget identifier for tkinter compatibility
         
-    def configure(self, **kwargs):
-        self.config_values.update(kwargs)
+    def call(self, *args):
+        """Mock tk.call method for tkinter compatibility"""
+        return None
+        
+    def createcommand(self, name, func):
+        """Mock tk.createcommand method for tkinter compatibility"""
+        pass
+        
+    def configure(self, *args, **kwargs):
+        # Handle both widget.configure(**kwargs) and style.configure(style_name, **kwargs)
+        if args:
+            # ttk.Style.configure(style_name, **kwargs) pattern
+            pass
+        else:
+            # Normal widget configure(**kwargs) pattern
+            self.config_values.update(kwargs)
         
     def config(self, **kwargs):
         self.configure(**kwargs)
@@ -113,6 +155,11 @@ class MockWidget:
         
     def pack_info(self):
         return self.pack_info_value
+    
+    def pack_propagate(self, flag=None):
+        if flag is None:
+            return True
+        return flag
         
     def grid(self, **kwargs):
         pass
@@ -127,24 +174,290 @@ class MockWidget:
         pass
         
     def winfo_children(self):
-        return self.children
+        return list(self.children.values())  # Return list of child widgets
         
     def winfo_class(self):
         return "MockWidget"
         
     def winfo_exists(self):
         return not self.destroyed
+    
+    def winfo_screenwidth(self):
+        return 1920
+    
+    def winfo_screenheight(self):
+        return 1080
+    
+    def winfo_width(self):
+        return 800
+    
+    def winfo_height(self):
+        return 600
+    
+    def winfo_x(self):
+        return 100
+    
+    def winfo_y(self):
+        return 100
         
     def destroy(self):
         self.destroyed = True
-        for child in self.children:
-            child.destroy()
+        for child in self.children.values():  # Iterate over values (widgets) not keys
+            if hasattr(child, 'destroy'):
+                child.destroy()
+            
+    def selection(self):
+        return self._selection
+        
+    def focus(self):
+        return "item1" if self._selection else None
+        
+    def focus_set(self):
+        pass
+    
+    # Dictionary-like access for tkinter widgets (e.g., tree['columns'])
+    def __getitem__(self, key):
+        return getattr(self, key, None)
+    
+    def __setitem__(self, key, value):
+        setattr(self, key, value)
+    
+    # Additional treeview methods
+    def column(self, column, **kw):
+        pass
+        
+    def heading(self, column, **kw):
+        pass
+    
+    def get_children(self, item=''):
+        return list(self.children.keys())  # Return list of child names for treeview compatibility
+        
+    def insert(self, parent, index, **kw):
+        item_id = f"item_{len(self.children)}"
+        self.children[item_id] = Mock()  # Add to dict instead of list
+        return item_id
+        
+    def delete(self, *items):
+        for item in items:
+            if item in self.children:
+                del self.children[item]  # Remove from dict instead of list
+        
+    def item(self, item_id=None, **kwargs):
+        return {'open': False, 'text': 'Mock Item'}
+    
+    # ttk.Style methods
+    def theme_use(self, theme_name=None):
+        pass
+        
+    def map(self, style_name, **kw):
+        pass
+    
+    # Scrollable widget methods
+    def yview(self, *args):
+        pass
+        
+    def xview(self, *args):
+        pass
+        
+    def yview_moveto(self, fraction):
+        pass
+        
+    def xview_moveto(self, fraction):
+        pass
+        
+    def yview_scroll(self, number, what):
+        pass
+        
+    def xview_scroll(self, number, what):
+        pass
+    
+    # Scrollbar methods / Treeview methods - different signatures
+    def set(self, *args):
+        # Handle both scrollbar.set(first, last) and tree.set(item, column, value)
+        pass
+
+
+class MockStringVar:
+    """Mock StringVar class"""
+    def __init__(self, master=None, value=None, name=None):
+        self.value = value or ""
+        
+    def get(self):
+        return self.value
+        
+    def set(self, value):
+        self.value = value
+
+
+class MockIntVar:
+    """Mock IntVar class"""
+    def __init__(self, master=None, value=None, name=None):
+        self.value = value or 0
+        
+    def get(self):
+        return self.value
+        
+    def set(self, value):
+        self.value = value
+
+
+class MockBooleanVar:
+    """Mock BooleanVar class"""
+    def __init__(self, master=None, value=None, name=None):
+        self.value = value or False
+        
+    def get(self):
+        return self.value
+        
+    def set(self, value):
+        self.value = value
+
+
+class MockDoubleVar:
+    """Mock DoubleVar class"""
+    def __init__(self, master=None, value=None, name=None):
+        self.value = value or 0.0
+        
+    def get(self):
+        return self.value
+        
+    def set(self, value):
+        self.value = value
+
+
+class MockToplevel(MockWidget):
+    """Mock Toplevel window class for preventing GUI windows during tests"""
+    def __init__(self, master=None, **kwargs):
+        super().__init__(master, **kwargs)
+        self._title = "Mock Toplevel"
+        self._geometry = "800x600"
+        self._bg = "white"
+        self._alpha = 1.0
+        self._topmost = False
+        self._overrideredirect = False
+        
+    def title(self, text=None):
+        if text is not None:
+            self._title = text
+        return self._title
+    
+    def geometry(self, geom=None):
+        if geom is not None:
+            self._geometry = geom
+        return self._geometry
+    
+    def configure(self, **kwargs):
+        for key, value in kwargs.items():
+            if key == 'bg':
+                self._bg = value
+            else:
+                setattr(self, key, value)
+    
+    def attributes(self, attr, value=None):
+        if attr == '-topmost':
+            if value is not None:
+                self._topmost = value
+            return self._topmost
+        elif attr == '-alpha':
+            if value is not None:
+                self._alpha = value
+            return self._alpha
+        return None
+    
+    def overrideredirect(self, boolean=None):
+        if boolean is not None:
+            self._overrideredirect = boolean
+        return self._overrideredirect
+    
+    def protocol(self, name, func):
+        pass
+    
+    def update_idletasks(self):
+        pass
+    
+    def winfo_x(self):
+        return 100
+    
+    def winfo_y(self):
+        return 100
+    
+    def winfo_screenwidth(self):
+        return 1920
+    
+    def winfo_screenheight(self):
+        return 1080
 
 
 @pytest.fixture
 def mock_tk_root():
     """Fixture providing a mock Tk root"""
     return MockTkRoot()
+
+
+@pytest.fixture
+def mock_gui_components():
+    """Fixture that mocks all GUI components to prevent windows during tests"""
+    patches = [
+        patch('tkinter.Tk', MockTkRoot),
+        patch('tkinter.Toplevel', MockToplevel),
+        patch('tick_tock_widget.monthly_report.tk.Toplevel', MockToplevel),
+        patch('tick_tock_widget.minimized_widget.tk.Toplevel', MockToplevel),
+        # Add project_management patches  
+        patch('tick_tock_widget.project_management.tk.Toplevel', MockToplevel),
+        patch('tick_tock_widget.project_management.tk.StringVar', MockStringVar),
+        patch('tick_tock_widget.project_management.tk.IntVar', MockIntVar),
+        patch('tick_tock_widget.project_management.tk.DoubleVar', MockDoubleVar),
+        patch('tick_tock_widget.project_management.tk.BooleanVar', MockBooleanVar),
+        patch('tkinter.StringVar', MockStringVar),
+        patch('tkinter.IntVar', MockIntVar),
+        patch('tkinter.DoubleVar', MockDoubleVar),
+        patch('tkinter.BooleanVar', MockBooleanVar),
+        # Also patch tk aliases for TickTockWidget
+        patch('tick_tock_widget.tick_tock_widget.tk.DoubleVar', MockDoubleVar),
+        patch('tick_tock_widget.tick_tock_widget.tk.StringVar', MockStringVar),
+        patch('tick_tock_widget.tick_tock_widget.tk.IntVar', MockIntVar),
+        patch('tick_tock_widget.tick_tock_widget.tk.BooleanVar', MockBooleanVar),
+        patch('tkinter.Frame', MockWidget),
+        patch('tkinter.Label', MockWidget),
+        patch('tkinter.Button', MockWidget),
+        patch('tkinter.Entry', MockWidget),
+        patch('tkinter.Text', MockWidget),
+        patch('tkinter.Listbox', MockWidget),
+        patch('tkinter.Canvas', MockWidget),
+        patch('tkinter.Scale', MockWidget),
+        patch('tkinter.Scrollbar', MockWidget),
+        patch('tkinter.Checkbutton', MockWidget),
+        patch('tkinter.Radiobutton', MockWidget),
+        patch('tkinter.Spinbox', MockWidget),
+        patch('tkinter.Menubutton', MockWidget),
+        patch('tkinter.Menu', MockWidget),
+        patch('tkinter.OptionMenu', MockWidget),
+        patch('tkinter.PanedWindow', MockWidget),
+        patch('tkinter.LabelFrame', MockWidget),
+        patch('tkinter.ttk.Treeview', MockWidget),
+        patch('tkinter.ttk.Style', MockWidget),
+        patch('tkinter.ttk.Combobox', MockWidget),
+        patch('tkinter.ttk.Scrollbar', MockWidget),
+        patch('tkinter.messagebox.showinfo', Mock()),
+        patch('tkinter.messagebox.showwarning', Mock()),
+        patch('tkinter.messagebox.showerror', Mock()),
+        patch('tkinter.messagebox.askquestion', Mock(return_value='yes')),
+        patch('tkinter.messagebox.askyesno', Mock(return_value=True)),
+        patch('tkinter.messagebox.askokcancel', Mock(return_value=True)),
+        patch('tkinter.messagebox.askretrycancel', Mock(return_value=True)),
+        patch('tkinter.messagebox.askyesnocancel', Mock(return_value=True)),
+        patch('tkinter.filedialog.askopenfilename', Mock(return_value='test_file.txt')),
+        patch('tkinter.filedialog.asksaveasfilename', Mock(return_value='test_save.txt')),
+        patch('tkinter.filedialog.askdirectory', Mock(return_value='/test/dir')),
+    ]
+    
+    for p in patches:
+        p.start()
+    
+    yield
+    
+    for p in patches:
+        p.stop()
 
 
 @pytest.fixture
@@ -308,6 +621,10 @@ def mock_config(temp_config_dir):
         mock_instance.get_tree_state.return_value = {}
         mock_instance.set_tree_state.return_value = None
         mock_instance.save_config.return_value = None
+        mock_instance.get_auto_save_interval.return_value = 300  # Return actual integer
+        mock_instance.is_backup_enabled.return_value = True
+        mock_instance.get_backup_directory.return_value = temp_config_dir / "backups"
+        mock_instance.get_max_backups.return_value = 10
         
         mock_class.return_value = mock_instance
         yield mock_instance
@@ -412,3 +729,19 @@ def freeze_time():
         mock_date.fromisoformat = date.fromisoformat
         
         yield test_time
+
+
+@pytest.fixture
+def mock_get_config():
+    """Fixture providing a mock get_config function with proper return values"""
+    with patch('tick_tock_widget.project_data.get_config') as mock_get_config_func:
+        mock_config = Mock()
+        mock_config.get_data_file.return_value = "test_data.json"
+        mock_config.get_auto_save_interval.return_value = 300
+        mock_config.is_backup_enabled.return_value = True
+        mock_config.get_backup_directory.return_value = Path("backups")
+        mock_config.get_max_backups.return_value = 10
+        mock_config.get_environment.return_value = Environment.TEST
+        mock_config.is_debug_mode.return_value = False
+        mock_get_config_func.return_value = mock_config
+        yield mock_get_config_func

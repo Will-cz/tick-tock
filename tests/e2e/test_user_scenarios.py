@@ -119,6 +119,7 @@ class TestUserScenarios:
             
             # Verify data persists by reloading
             manager2 = ProjectDataManager(data_file=str(data_file))
+            manager2.load_projects()
             assert len(manager2.projects) == 1
             reloaded_project = manager2.projects[0]
             assert reloaded_project.name == "My First Project"
@@ -319,6 +320,7 @@ class TestUserScenarios:
             
             # Reload and verify structure
             manager2 = ProjectDataManager(data_file=str(data_file))
+            manager2.load_projects()
             assert len(manager2.projects) == 2
             
             project_aliases = [p.alias for p in manager2.projects]
