@@ -16,6 +16,7 @@ from .minimized_widget import MinimizedTickTockWidget
 from .monthly_report import MonthlyReportWindow
 from .theme_colors import ThemeColors
 from .config import get_config, Environment
+from .system_tray import SystemTrayManager, is_system_tray_available
 
 WidgetType = Union[tk.Widget, ttk.Widget]
 
@@ -25,7 +26,10 @@ class TickTockWidget:
 
     def __init__(self):
         self.root = tk.Tk()
-        self.config = get_config()  # Get the configuration instance
+        
+        # Get the global configuration instance (automatically handles SecureConfig for executables)
+        self.config = get_config()
+            
         self.data_manager = ProjectDataManager()
         self.is_timing = False
         self.project_mgmt_window = None  # Track project management window
@@ -36,6 +40,13 @@ class TickTockWidget:
         self.env_label: Optional[tk.Label] = None
         self._timing_explicitly_set: bool = False
         self._last_window_pos: Optional[dict[str, int]] = None
+        self._window_visible = True  # Track window visibility for system tray
+        self._auto_save_timer_id = None  # Track auto-save timer for cleanup
+        self._update_time_timer_id = None  # Track time update timer for cleanup
+        
+        # Initialize system tray
+        self.system_tray: Optional[SystemTrayManager] = None
+        self._init_system_tray()
 
         # App state and themes - define these before creating widgets
         self.current_theme = 0
@@ -363,7 +374,7 @@ class TickTockWidget:
         ).pack(pady=1)
 
         # Environment management button (only show in development and test modes)
-        if self.config.get_environment().value != "production":
+        if self.config.get_environment().value not in ["production", "prototype"]:
             tk.Button(
                 management_buttons_frame,
                 text="🌍 Env",
@@ -1046,6 +1057,19 @@ class TickTockWidget:
         self.time_label.bind("<B1-Motion>", self.on_drag)
         self.date_label.bind("<Button-1>", self.start_drag)
         self.date_label.bind("<B1-Motion>", self.on_drag)
+        
+        # Setup keyboard shortcuts for system tray
+        self.setup_keyboard_shortcuts()
+
+    def setup_keyboard_shortcuts(self):
+        """Setup keyboard shortcuts for system tray functionality"""
+        # Ctrl+H to hide to system tray
+        self.root.bind('<Control-h>', lambda e: self._hide_window())
+        # Ctrl+Shift+H to show from system tray
+        self.root.bind('<Control-Shift-H>', lambda e: self._show_window())
+        # Alt+F4 or Escape to hide to system tray (if available) or quit
+        self.root.bind('<Alt-F4>', lambda e: self._on_window_close())
+        self.root.bind('<Escape>', lambda e: self._on_window_close())
 
     def start_drag(self, event: Any) -> None:
         """Start dragging the window"""
@@ -1092,7 +1116,7 @@ class TickTockWidget:
                     self.update_open_windows()
 
         # Schedule next update
-        self.root.after(1000, self.update_time)
+        self._update_time_timer_id = self.root.after(1000, self.update_time)
 
     def update_open_windows(self):
         """Update open management and report windows with latest data"""
@@ -1122,10 +1146,10 @@ class TickTockWidget:
 
     def schedule_auto_save(self):
         """Schedule automatic data saving"""
-        self.data_manager.save_projects()
+        self.data_manager.save_projects(force=True)
         # Schedule next auto-save based on config interval
         interval_ms = self.config.get_auto_save_interval() * 1000
-        self.root.after(interval_ms, self.schedule_auto_save)
+        self._auto_save_timer_id = self.root.after(interval_ms, self.schedule_auto_save)
 
     def show_project_management(self):
         """Show the project management window"""
@@ -1390,6 +1414,10 @@ class TickTockWidget:
                 pass
         self.minimized_widget = None
         self.root.deiconify()  # Show the main window
+        
+        # Update displays to reflect any changes made in minimized window
+        self.update_project_display()
+        self.update_project_list()
 
     def close_app(self):
         """Close the application"""
@@ -1442,20 +1470,201 @@ class TickTockWidget:
         """Property to access the sub-activity tree (for compatibility with tests)"""
         return self.sub_tree
 
+    def _init_system_tray(self):
+        """Initialize the system tray icon"""
+        if is_system_tray_available():
+            try:
+                self.system_tray = SystemTrayManager(
+                    main_window_callback=self._toggle_window_visibility,
+                    quit_callback=self._quit_application
+                )
+                print("🔧 System tray manager initialized")
+            except Exception as e:
+                print(f"Warning: Could not initialize system tray: {e}")
+                self.system_tray = None
+        else:
+            print("Warning: System tray not available (pystray/Pillow not installed)")
+            self.system_tray = None
+
+    def _toggle_window_visibility(self, force_show=False, force_hide=False):
+        """Toggle or force window visibility for system tray"""
+        try:
+            if force_show:
+                self._show_window()
+            elif force_hide:
+                self._hide_window()
+            else:
+                # Toggle based on current state
+                if self._window_visible:
+                    self._hide_window()
+                else:
+                    self._show_window()
+        except Exception as e:
+            print(f"Error toggling window visibility: {e}")
+
+    def _show_window(self):
+        """Show the main window"""
+        try:
+            self.root.deiconify()  # Show window if it was iconified
+            self.root.lift()       # Bring to front
+            self.root.focus_force()  # Give it focus
+            self._window_visible = True
+            
+            # Update system tray tooltip
+            if self.system_tray:
+                current_project = self.project_combobox.get() if hasattr(self, 'project_combobox') else "No project"
+                timing_status = "🟢 Timing" if self.is_timing else "⏸️ Paused"
+                tooltip = f"Tick-Tock Widget - {current_project} ({timing_status})"
+                self.system_tray.update_tooltip(tooltip)
+                
+        except Exception as e:
+            print(f"Error showing window: {e}")
+
+    def _hide_window(self):
+        """Hide the main window to system tray"""
+        try:
+            self.root.withdraw()  # Hide the window
+            self._window_visible = False
+            
+            # Update system tray tooltip
+            if self.system_tray:
+                current_project = self.project_combobox.get() if hasattr(self, 'project_combobox') else "No project"
+                timing_status = "🟢 Timing" if self.is_timing else "⏸️ Paused"
+                tooltip = f"Tick-Tock Widget (Hidden) - {current_project} ({timing_status})"
+                self.system_tray.update_tooltip(tooltip)
+                
+        except Exception as e:
+            print(f"Error hiding window: {e}")
+
+    def _quit_application(self):
+        """Quit the entire application"""
+        try:
+            print("🔻 Shutting down Tick-Tock Widget...")
+            
+            # Cancel any scheduled timers
+            if self._auto_save_timer_id:
+                print("🔻 Cancelling auto-save timer...")
+                self.root.after_cancel(self._auto_save_timer_id)
+                self._auto_save_timer_id = None
+                
+            if self._update_time_timer_id:
+                print("🔻 Cancelling time update timer...")
+                self.root.after_cancel(self._update_time_timer_id)
+                self._update_time_timer_id = None
+            
+            # Stop the system tray first
+            if self.system_tray:
+                print("🔻 Stopping system tray...")
+                self.system_tray.stop()
+            
+            # Save any pending data
+            if hasattr(self, 'data_manager') and self.data_manager:
+                print("� Stopping all project timers...")
+                self.data_manager.stop_all_timers()
+                print("�💾 Saving project data...")
+                self.data_manager.save_projects(force=True)
+            
+            # Close any open windows
+            if hasattr(self, 'project_mgmt_window') and self.project_mgmt_window:
+                try:
+                    self.project_mgmt_window.window.destroy()
+                except:
+                    pass
+            
+            if hasattr(self, 'monthly_report_window') and self.monthly_report_window:
+                try:
+                    self.monthly_report_window.window.destroy()
+                except:
+                    pass
+            
+            if hasattr(self, 'minimized_widget') and self.minimized_widget:
+                try:
+                    self.minimized_widget.root.destroy()
+                except:
+                    pass
+            
+            # Quit the main application
+            print("🔻 Terminating application...")
+            self.root.quit()
+            self.root.destroy()
+            
+            # Force exit if needed
+            import sys
+            sys.exit(0)
+            
+        except Exception as e:
+            print(f"Error during application quit: {e}")
+            # Force exit on error
+            import sys
+            sys.exit(1)
+
+    def _start_system_tray(self):
+        """Start the system tray icon"""
+        if self.system_tray and not self.system_tray.is_running():
+            success = self.system_tray.start()
+            if success:
+                # Set initial tooltip
+                current_project = self.project_combobox.get() if hasattr(self, 'project_combobox') else "No project"
+                timing_status = "🟢 Timing" if self.is_timing else "⏸️ Paused"
+                tooltip = f"Tick-Tock Widget - {current_project} ({timing_status})"
+                self.system_tray.update_tooltip(tooltip)
+                return True
+            return False
+        return True
+
     def run(self):
         """Run the application"""
+        # Start system tray if available
+        self._start_system_tray()
+        
+        # Set up window close protocol to minimize to tray instead of closing
+        self.root.protocol("WM_DELETE_WINDOW", self._on_window_close)
+        
+        # Run the main loop
         self.root.mainloop()
+
+    def _on_window_close(self):
+        """Handle window close event - minimize to tray if available, otherwise quit"""
+        if self.system_tray and self.system_tray.is_running():
+            # Save data before hiding to tray (safety measure)
+            print("💾 Saving data before minimizing to tray...")
+            if hasattr(self, 'data_manager') and self.data_manager:
+                self.data_manager.save_projects(force=True)
+            
+            # Hide to system tray instead of closing
+            self._hide_window()
+            
+            # Show a notification on first minimize (optional)
+            if self._window_visible:  # First time minimizing
+                print("💡 Tick-Tock Widget minimized to system tray. Right-click the tray icon to quit.")
+        else:
+            # No system tray available, quit normally with the same data saving as the original close_app
+            print("💾 No system tray available, saving data and quitting...")
+            self.close_app()
 
 
 def main():
     """Main function to run the Tick-Tock Widget"""
     import sys
+    import os
 
-    # Check if running as executable and in production mode
+    # Check if running as executable and in prototype mode
     is_executable = getattr(sys, 'frozen', False)
+    is_prototype_build = os.environ.get('TICK_TOCK_ENV', '').lower() == 'prototype'
+
+    # Initialize secure configuration if this is a prototype executable
+    if is_executable and is_prototype_build:
+        try:
+            from .secure_config import init_secure_config
+            config = init_secure_config()
+            print("🔒 Secure configuration initialized for prototype build")
+        except ImportError:
+            # Fallback to regular config if secure config not available
+            config = get_config()
+    else:
+        config = get_config()
 
     try:
-        config = get_config()
         current_env = config.get_environment()
         data_file = config.get_data_file()
         is_production = current_env.value == "production"

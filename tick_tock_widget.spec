@@ -8,7 +8,9 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
-        ('src/tick_tock_widget/config.json', 'tick_tock_widget/'),  # Include config file
+        # Embed a prototype marker file to identify prototype builds
+        ('src/tick_tock_widget/prototype_marker.txt', '.'),
+        ('assets/tick_tock_icon.ico', 'assets/'),
     ],
     hiddenimports=[
         'tick_tock_widget.main',
@@ -52,5 +54,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # Add icon path here if you have one: 'assets/icon.ico'
+    icon='assets/tick_tock_icon.ico',  # Icon for the executable
 )

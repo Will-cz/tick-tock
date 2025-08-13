@@ -1,9 +1,10 @@
 # Tick-Tock Widget Requirements
 # 
-# This project uses only Python standard library for core functionality.
-# The main application has no external dependencies and runs with just Python 3.8+
-#
-# Runtime Dependencies: NONE (uses only Python standard library)
+# Runtime Dependencies for system tray functionality
+pystray>=0.19.4
+Pillow>=10.0.0
+
+# Core Dependencies (Python standard library)
 # - tkinter (included with Python)
 # - json (included with Python) 
 # - datetime (included with Python)

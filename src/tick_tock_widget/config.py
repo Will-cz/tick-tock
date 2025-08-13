@@ -31,7 +31,7 @@ class Config:
         "data_files": {
             "development": "user_data/tick_tock_projects_dev.json",
             "production": "user_data/tick_tock_projects.json",
-            "test": "user_data/tick_tock_projects_test.json",
+            "test": "tests/fixtures/test_data.json",
             "prototype": "user_data/tick_tock_projects_prototype.json"
         },
         "environment_display": {
@@ -339,7 +339,21 @@ def get_config() -> Config:
     """Get global configuration instance"""
     global _config_instance
     if _config_instance is None:
-        _config_instance = Config()
+        # Check if we should use SecureConfig for executables
+        import sys
+        is_executable = getattr(sys, 'frozen', False)
+        
+        if is_executable:
+            try:
+                from .secure_config import SecureConfig
+                _config_instance = SecureConfig()
+                print("🔒 Global config: Using SecureConfig for executable")
+            except ImportError:
+                _config_instance = Config()
+                print("⚠️ Global config: SecureConfig not available, using regular Config")
+        else:
+            _config_instance = Config()
+            print("🔧 Global config: Using regular Config for development")
     return _config_instance
 
 

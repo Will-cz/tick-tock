@@ -13,36 +13,55 @@ cd /d "%~dp0"
 venv\Scripts\python.exe -m PyInstaller --clean tick_tock_widget.spec
 
 echo.
-echo Creating prototype folder...
-if not exist prototype mkdir prototype
+echo Verifying build in dist folder...
+if exist dist\TickTockWidget.exe (
+    echo   ✅ Executable built successfully
+    for %%A in (dist\TickTockWidget.exe) do echo   📏 Size: %%~zA bytes
+) else (
+    echo   ❌ Build failed - executable not found
+    goto :end
+)
 
-REM Copy executable
-echo Copying TickTockWidget.exe...
-copy dist\TickTockWidget.exe prototype\ /Y
-
-REM Copy LICENSE file (required)
-echo Copying LICENSE...
+REM Copy LICENSE file to dist (required)
+echo Copying LICENSE to dist...
 if exist LICENSE (
-    copy LICENSE prototype\ /Y
-    echo   ✅ LICENSE copied
+    copy LICENSE dist\ /Y
+    echo   ✅ LICENSE copied to dist
 ) else (
     echo   ⚠️  LICENSE file not found
 )
 
-REM Copy README.md file (optional)
-echo Copying README.md...
+REM Copy README.md file to dist (optional)
+echo Copying README.md to dist...
 if exist README.md (
-    copy README.md prototype\ /Y
-    echo   ✅ README.md copied
+    copy README.md dist\ /Y
+    echo   ✅ README.md copied to dist
 ) else (
     echo   ⚠️  README.md file not found (optional)
 )
 
+REM Create antivirus notice in dist
+echo Creating antivirus notice...
+echo ANTIVIRUS NOTICE> dist\ANTIVIRUS_README.txt
+echo ================>> dist\ANTIVIRUS_README.txt
+echo.>> dist\ANTIVIRUS_README.txt
+echo If your antivirus flags this executable, it's likely a false positive.>> dist\ANTIVIRUS_README.txt
+echo PyInstaller-built applications are commonly flagged by antivirus software.>> dist\ANTIVIRUS_README.txt
+echo.>> dist\ANTIVIRUS_README.txt
+echo SAFE ACTIONS:>> dist\ANTIVIRUS_README.txt
+echo 1. Add the 'dist' folder to antivirus exclusions>> dist\ANTIVIRUS_README.txt
+echo 2. Verify with VirusTotal.com if concerned>> dist\ANTIVIRUS_README.txt
+echo 3. Build from source code yourself>> dist\ANTIVIRUS_README.txt
+echo.>> dist\ANTIVIRUS_README.txt
+echo Source: https://github.com/Will-cz/tick-tock>> dist\ANTIVIRUS_README.txt
+echo   ✅ Antivirus notice created
+
+:end
 echo.
 echo =========================================
 echo   BUILD COMPLETE! 
-echo   Executable: prototype\TickTockWidget.exe
-echo   Size: ~12.5 MB
+echo   Executable: dist\TickTockWidget.exe
+echo   Ready for distribution from dist folder
 echo =========================================
 echo.
 pause

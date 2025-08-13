@@ -7,6 +7,7 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock, mock_open
 from datetime import datetime
 import tkinter as tk
+import calendar
 
 @pytest.mark.gui
 class TestMonthlyReportWindow:
@@ -136,13 +137,16 @@ class TestMonthlyReportWindow:
         window.tree = Mock()
         mock_item = "item1"
         window.tree.get_children.return_value = [mock_item]
-        window.tree.item.return_value = {'open': True}
+        window.tree.item.return_value = {'open': True, 'text': '📁 TestProject'}
+        
+        # Mock the config's save_tree_state method
+        window.config.save_tree_state = Mock()
         
         # Save tree state
         window.save_tree_state()
         
-        # Verify tree state was saved
-        mocks['config'].set_tree_state.assert_called_once()
+        # Verify tree state was saved with correct method
+        window.config.save_tree_state.assert_called_once()
 
     def test_navigation_methods(self, mock_setup):
         """Test month navigation"""
@@ -183,14 +187,16 @@ class TestMonthlyReportWindow:
         )
         
         # Set to February to test going back to January
-        window.current_month = 2
-        window.current_year = 2024
+        # Need to set the StringVar values that the method actually uses
+        window.month_var.set(calendar.month_name[2])  # February
+        window.year_var.set("2024")
         window.update_report = Mock()
         
         window.previous_month()
         
-        assert window.current_month == 1
-        assert window.current_year == 2024
+        # Check that month_var was updated to January
+        assert window.month_var.get() == calendar.month_name[1]  # January
+        assert window.year_var.get() == "2024"
         window.update_report.assert_called_once()
 
     def test_update_theme(self, mock_setup):
@@ -336,6 +342,7 @@ class TestMonthlyReportWindow:
         window.tree = Mock()
         window.tree.focus.return_value = "item1"
         window.tree.item.return_value = {'open': False}
+        window.tree.selection.return_value = ["item1"]  # Return list of selected items
         
         # Test double-click
         event = Mock()

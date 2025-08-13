@@ -72,11 +72,23 @@ class TestConfig:
         with open(config_file, 'w') as f:
             json.dump(custom_config, f)
         
-        with patch('tick_tock_widget.config.Path.__new__') as mock_path, \
-             patch('tick_tock_widget.config.sys', frozen=False, create=True):
+        # Mock the Path and sys to make Config use our temp directory
+        with patch('tick_tock_widget.config.Path') as mock_path_class, \
+             patch('tick_tock_widget.config.sys') as mock_sys:
             
-            mock_path.return_value.parent = temp_config_dir
-            mock_path.return_value.__truediv__ = lambda self, other: temp_config_dir / other
+            # Mock sys.frozen
+            mock_sys.frozen = False
+            
+            # Mock Path constructor to return our config file path
+            def mock_path_init(path_str):
+                if str(path_str).endswith('config.py'):
+                    mock_path = Mock()
+                    mock_path.parent = temp_config_dir
+                    mock_path.__truediv__ = lambda self, other: temp_config_dir / other
+                    return mock_path
+                return Path(path_str)
+            
+            mock_path_class.side_effect = mock_path_init
             
             config = Config(config_file="config.json")
             
@@ -232,9 +244,11 @@ class TestConfig:
                 "tree_states": {}
             }
         }
+        config.config_file = Path("test_config.json")  # Add missing config_file attribute
         
         new_state = {"item1": True, "item2": False}
-        config.set_tree_state("project_management", new_state)
+        with patch.object(config, 'save_config'):  # Mock save_config to avoid file operations
+            config.set_tree_state("project_management", new_state)
         
         assert config.config["ui_settings"]["tree_states"]["project_management"] == new_state
     
@@ -317,7 +331,7 @@ class TestConfig:
             config = Config.__new__(Config)
             result = config._get_user_data_directory()
             
-            expected = Path("/home/test/.local/share/TickTock")
+            expected = Path("/home/test/.local/share/tick-tock")  # Fix: should be tick-tock not TickTock
             assert result == expected
     
     def test_migrate_data_file(self, temp_config_dir):

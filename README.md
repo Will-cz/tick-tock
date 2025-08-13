@@ -34,13 +34,16 @@ This legacy prototype was an early version of a comprehensive project time track
 - 📈 **Basic Reporting**: Simple monthly time reports
 - 💾 **JSON Data Storage**: File-based project data persistence
 - 🪟 **Windows Desktop Widget**: Minimizable desktop application
+- 🔔 **System Tray Integration**: Windows system tray support with hide/show functionality
 
 ### Legacy Technical Stack
 
 - **Language**: Python 3.8+
 - **GUI Framework**: Tkinter (Python standard library)
 - **Data Storage**: JSON files
-- **Dependencies**: None (uses only Python standard library)
+- **Dependencies**: 
+  - Core: None (uses only Python standard library)
+  - System Tray: pystray, Pillow (optional, graceful degradation)
 - **Platform**: Windows (primary), cross-platform compatible
 
 ## Repository Structure (Legacy)

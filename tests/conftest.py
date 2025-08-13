@@ -8,6 +8,7 @@ import tempfile
 import json
 from pathlib import Path
 from datetime import datetime, date
+from typing import Generator
 import sys
 import os
 
@@ -17,8 +18,18 @@ if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
 from tick_tock_widget.project_data import ProjectDataManager, Project, SubActivity, TimeRecord
-from tick_tock_widget.config import Config, Environment
+from tick_tock_widget.config import Config, Environment, reset_config
 from tick_tock_widget.theme_colors import ThemeColors
+
+
+@pytest.fixture(autouse=True)
+def isolate_config():
+    """Automatically reset global config state before and after each test"""
+    # Reset before test
+    reset_config()
+    yield
+    # Reset after test
+    reset_config()
 
 
 class MockTkRoot:
@@ -29,6 +40,7 @@ class MockTkRoot:
         self.title_value = "Test Window"
         self.attributes_calls = []
         self.protocol_handlers = {}
+        self.key_bindings = {}  # Track key bindings for testing
         self.destroyed = False
         self.x = 100
         self.y = 100
@@ -42,6 +54,8 @@ class MockTkRoot:
         self.deiconify = Mock()
         self.option_add = Mock()
         self.geometry = Mock(return_value="400x300+100+100")
+        self.lift = Mock()  # Add lift method for system tray tests
+        self.focus_force = Mock()  # Add focus_force method
         
     def winfo_x(self):
         return self.x
@@ -114,6 +128,18 @@ class MockTkRoot:
         
     def after_cancel(self, job_id):
         pass
+    
+    def bind(self, sequence, func):
+        """Mock bind method for keyboard shortcuts"""
+        self.key_bindings[sequence] = func
+    
+    def lift(self):
+        """Mock lift method to bring window to front"""
+        pass
+    
+    def focus_force(self):
+        """Mock focus_force method to force focus to window"""
+        pass
 
 
 class MockWidget:
@@ -132,7 +158,13 @@ class MockWidget:
         
     def call(self, *args):
         """Mock tk.call method for tkinter compatibility"""
-        return None
+        return ""
+        
+    def splitlist(self, value):
+        """Mock tk.splitlist method for tkinter compatibility"""
+        if isinstance(value, (list, tuple)):
+            return list(value)
+        return []
         
     def createcommand(self, name, func):
         """Mock tk.createcommand method for tkinter compatibility"""
@@ -274,6 +306,33 @@ class MockWidget:
     # Scrollbar methods / Treeview methods - different signatures
     def set(self, *args):
         # Handle both scrollbar.set(first, last) and tree.set(item, column, value)
+        pass
+    
+    # Combobox methods
+    def current(self, index=None):
+        """Mock combobox current method"""
+        if index is not None:
+            self._current_index = index
+        return getattr(self, '_current_index', 0)
+    
+    def get(self):
+        """Mock widget get method"""
+        return getattr(self, '_value', "")
+    
+    def set(self, *args, **kwargs):
+        """Mock widget set method - handles variable arguments"""
+        if args:
+            self._value = args[0]  # Use first argument as value
+        else:
+            self._value = kwargs.get('value', '')
+    
+    # Treeview tag methods  
+    def tag_configure(self, tag, **kwargs):
+        """Mock treeview tag_configure method"""
+        pass
+    
+    def tag_bind(self, tag, event, callback):
+        """Mock treeview tag_bind method"""
         pass
 
 
@@ -641,7 +700,11 @@ def patch_tkinter():
          patch('tkinter.Entry') as mock_entry, \
          patch('tkinter.messagebox') as mock_messagebox, \
          patch('tkinter.ttk.Treeview') as mock_treeview, \
-         patch('tkinter.ttk.Style') as mock_style:
+         patch('tkinter.ttk.Style') as mock_style, \
+         patch('tkinter.StringVar') as mock_stringvar, \
+         patch('tkinter.DoubleVar') as mock_doublevar, \
+         patch('tkinter.IntVar') as mock_intvar, \
+         patch('tkinter.BooleanVar') as mock_booleanvar:
         
         # Configure mocks to return MockWidget instances
         mock_tk.return_value = MockTkRoot()
@@ -652,6 +715,12 @@ def patch_tkinter():
         mock_entry.return_value = MockWidget()
         mock_treeview.return_value = MockWidget()
         mock_style.return_value = Mock()
+        
+        # Mock Tkinter Variables
+        mock_stringvar.return_value = MockStringVar()
+        mock_doublevar.return_value = MockStringVar()  # Use same mock for all vars
+        mock_intvar.return_value = MockStringVar()
+        mock_booleanvar.return_value = MockStringVar()
         
         # Mock messagebox functions
         mock_messagebox.showinfo.return_value = None
@@ -669,7 +738,11 @@ def patch_tkinter():
             'entry': mock_entry,
             'messagebox': mock_messagebox,
             'treeview': mock_treeview,
-            'style': mock_style
+            'style': mock_style,
+            'stringvar': mock_stringvar,
+            'doublevar': mock_doublevar,
+            'intvar': mock_intvar,
+            'booleanvar': mock_booleanvar
         }
 
 
@@ -734,14 +807,75 @@ def freeze_time():
 @pytest.fixture
 def mock_get_config():
     """Fixture providing a mock get_config function with proper return values"""
-    with patch('tick_tock_widget.project_data.get_config') as mock_get_config_func:
+    with patch('tick_tock_widget.project_data.get_config') as mock_get_config_func, \
+         patch('tick_tock_widget.tick_tock_widget.get_config') as mock_widget_get_config:
         mock_config = Mock()
-        mock_config.get_data_file.return_value = "test_data.json"
+        # Use proper path to fixtures instead of relative "test_data.json"
+        test_data_path = Path(__file__).parent / "fixtures" / "test_data.json"
+        mock_config.get_data_file.return_value = str(test_data_path)
         mock_config.get_auto_save_interval.return_value = 300
         mock_config.is_backup_enabled.return_value = True
         mock_config.get_backup_directory.return_value = Path("backups")
         mock_config.get_max_backups.return_value = 10
         mock_config.get_environment.return_value = Environment.TEST
         mock_config.is_debug_mode.return_value = False
+        mock_config.get_auto_idle_time_seconds.return_value = 300
+        mock_config.get_timer_popup_interval_seconds.return_value = 600
+        mock_config.get_window_title.return_value = "Tick-Tock Widget [TEST]"
+        mock_config.get_title_color.return_value = "#FFFF00"
+        mock_config.get_border_color.return_value = "#444400"
         mock_get_config_func.return_value = mock_config
-        yield mock_get_config_func
+        mock_widget_get_config.return_value = mock_config
+        yield mock_widget_get_config
+
+
+@pytest.fixture
+def test_data_file() -> Path:
+    """
+    Fixture that provides the path to the test data file.
+    The file is auto-created if it doesn't exist and is located in tests/fixtures/
+    This allows pytest tests to use the same test data file as the test environment.
+    """
+    test_data_path = Path(__file__).parent / "fixtures" / "test_data.json"
+    
+    # Ensure the fixtures directory exists
+    test_data_path.parent.mkdir(exist_ok=True)
+    
+    # If the file doesn't exist, create it with minimal structure
+    if not test_data_path.exists():
+        minimal_data = {
+            "projects": [],
+            "current_project_alias": None,
+            "current_sub_activity_alias": None,
+            "last_saved": datetime.now().isoformat(),
+            "environment": "test"
+        }
+        with open(test_data_path, 'w', encoding='utf-8') as f:
+            json.dump(minimal_data, f, indent=2)
+    
+    return test_data_path
+
+
+@pytest.fixture
+def clean_test_data(test_data_file: Path) -> Generator[Path, None, None]:
+    """
+    Fixture that ensures test data file starts clean for each test.
+    Use this when you need a fresh test data environment.
+    """
+    # Clean the test data file
+    clean_data = {
+        "projects": [],
+        "current_project_alias": None,
+        "current_sub_activity_alias": None,
+        "last_saved": datetime.now().isoformat(),
+        "environment": "test"
+    }
+    
+    with open(test_data_file, 'w', encoding='utf-8') as f:
+        json.dump(clean_data, f, indent=2)
+    
+    yield test_data_file
+    
+    # Optionally clean up after test (uncomment if desired)
+    # with open(test_data_file, 'w', encoding='utf-8') as f:
+    #     json.dump(clean_data, f, indent=2)

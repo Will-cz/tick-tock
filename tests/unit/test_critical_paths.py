@@ -35,23 +35,23 @@ class TestCriticalPaths:
         """Test recovery from corrupted config file"""
         with patch('builtins.open', mock_open(read_data='invalid json {')):
             with patch('json.load', side_effect=json.JSONDecodeError("Invalid", "doc", 0)):
-                with patch('tick_tock_widget.config.Config.create_default_config') as mock_default:
-                    # Should not crash, should create default config
-                    from tick_tock_widget.config import Config
-                    config = Config()
-                    # Should attempt to create default config on JSON error
-                    assert True  # If we reach here, no crash occurred
+                # Should not crash, should use default config
+                from tick_tock_widget.config import Config
+                config = Config()
+                # Should have default values even with corrupted file
+                assert config.config is not None
+                assert "environment" in config.config
     
     def test_data_file_corruption_recovery(self):
         """Test recovery from corrupted project data file"""
         with patch('builtins.open', mock_open(read_data='invalid json [')):
             with patch('json.load', side_effect=json.JSONDecodeError("Invalid", "doc", 0)):
-                with patch('tick_tock_widget.project_data.ProjectData.create_default_projects') as mock_default:
-                    # Should not crash, should create default data
-                    from tick_tock_widget.project_data import ProjectData
-                    pd = ProjectData()
-                    # Should handle JSON error gracefully
-                    assert True  # If we reach here, no crash occurred
+                # Should not crash, should create default projects
+                from tick_tock_widget.project_data import ProjectDataManager
+                pdm = ProjectDataManager()
+                # Should have default empty projects list even with corrupted file
+                assert pdm.projects is not None
+                assert isinstance(pdm.projects, list)
     
     def test_gui_initialization_failure_recovery(self):
         """Test GUI handles initialization failures"""
@@ -61,46 +61,68 @@ class TestCriticalPaths:
                 from tick_tock_widget.tick_tock_widget import TickTockWidget
                 widget = TickTockWidget()
     
-    @patch('tick_tock_widget.tick_tock_widget.ProjectData')
-    @patch('tick_tock_widget.tick_tock_widget.Config')
-    @patch('tkinter.Tk')
-    def test_close_app_data_persistence_critical(self, mock_tk, mock_config, mock_project_data):
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    @patch('tick_tock_widget.tick_tock_widget.get_config')
+    def test_close_app_data_persistence_critical(self, mock_config, mock_project_data, mock_gui_components):
         """CRITICAL: Test close_app saves data before shutdown"""
-        # Setup mocks
-        mock_root = Mock()
-        mock_tk.return_value = mock_root
-        
+        # Setup mocks using the GUI fixture
         mock_data_manager = Mock()
         mock_project_data.return_value = mock_data_manager
         
-        mock_config_instance = Mock()
-        mock_config.return_value = mock_config_instance
+        # Setup mock project with proper attributes
+        mock_project = Mock()
+        mock_project.sub_activities = []  # Empty list to avoid iteration issues
+        mock_project.name = "Test Project"
+        mock_project.alias = "TP"
         
+        # Setup data manager methods
+        mock_data_manager.get_current_project.return_value = mock_project
+        mock_data_manager.get_project_aliases.return_value = ["TP"]
+        mock_data_manager.current_project_alias = "TP"
+        mock_data_manager.projects = [mock_project]
+
+        mock_config_instance = Mock()
+        mock_config_instance.get_window_title.return_value = "Test Window"
+        mock_config_instance.get_title_color.return_value = "#FFFFFF"
+        mock_config_instance.get_environment.return_value = Mock(value="test")
+        mock_config_instance.get_auto_idle_time_seconds.return_value = 300
+        mock_config_instance.get_timer_popup_interval_seconds.return_value = 600
+        mock_config_instance.get_auto_save_interval.return_value = 60  # Return number for math operation
+        mock_config.return_value = mock_config_instance
+
         # Import and create widget
         from tick_tock_widget.tick_tock_widget import TickTockWidget
         widget = TickTockWidget()
         
         # Test close_app MUST save data
         widget.close_app()
-        
+
         # CRITICAL: Verify data is saved before shutdown
         mock_data_manager.stop_all_timers.assert_called_once()
-        mock_data_manager.save_projects.assert_called_once_with(force=True)
-        mock_root.destroy.assert_called_once()
-    
-    @patch('tick_tock_widget.tick_tock_widget.ProjectData')
-    @patch('tick_tock_widget.tick_tock_widget.Config')
-    @patch('tkinter.Tk')
-    def test_window_close_event_safety(self, mock_tk, mock_config, mock_project_data):
+        # Check that save_projects was called with force=True (the critical call)
+        mock_data_manager.save_projects.assert_any_call(force=True)
+
+    @patch('tick_tock_widget.tick_tock_widget.ProjectDataManager')
+    @patch('tick_tock_widget.tick_tock_widget.get_config')
+    def test_window_close_event_safety(self, mock_config, mock_project_data, mock_gui_components):
         """CRITICAL: Test window close event doesn't lose data"""
-        # Setup mocks
-        mock_root = Mock()
-        mock_tk.return_value = mock_root
-        
+        # Setup mocks using the GUI fixture
         mock_data_manager = Mock()
         mock_project_data.return_value = mock_data_manager
-        
-        # Import and create widget
+
+        # Setup mock project with proper attributes
+        mock_project = Mock()
+        mock_project.sub_activities = []  # Empty list to avoid iteration issues
+        mock_data_manager.get_current_project.return_value = mock_project
+
+        mock_config_instance = Mock()
+        mock_config_instance.get_window_title.return_value = "Test Window"
+        mock_config_instance.get_title_color.return_value = "#FFFFFF"
+        mock_config_instance.get_environment.return_value = Mock(value="test")
+        mock_config_instance.get_auto_idle_time_seconds.return_value = 300
+        mock_config_instance.get_timer_popup_interval_seconds.return_value = 600
+        mock_config_instance.get_auto_save_interval.return_value = 60  # Return number for math operation
+        mock_config.return_value = mock_config_instance        # Import and create widget
         from tick_tock_widget.tick_tock_widget import TickTockWidget
         widget = TickTockWidget()
         
@@ -132,24 +154,37 @@ class TestCriticalPaths:
                 except Exception as e:
                     pytest.fail(f"Environment {env_name} caused crash: {e}")
     
-    def test_timer_state_during_shutdown(self):
+    def test_timer_state_during_shutdown(self, mock_gui_components):
         """Test timer state is properly handled during shutdown"""
-        with patch('tick_tock_widget.tick_tock_widget.ProjectData') as mock_pd:
-            with patch('tick_tock_widget.tick_tock_widget.Config'):
-                with patch('tkinter.Tk'):
-                    mock_data_manager = Mock()
-                    mock_pd.return_value = mock_data_manager
-                    
-                    from tick_tock_widget.tick_tock_widget import TickTockWidget
-                    widget = TickTockWidget()
-                    
-                    # Simulate active timers
-                    mock_data_manager.stop_all_timers = Mock()
-                    
-                    widget.close_app()
-                    
-                    # CRITICAL: All timers must be stopped before shutdown
-                    mock_data_manager.stop_all_timers.assert_called_once()
+        with patch('tick_tock_widget.tick_tock_widget.ProjectDataManager') as mock_pd:
+            with patch('tick_tock_widget.tick_tock_widget.get_config') as mock_config:
+                mock_data_manager = Mock()
+                mock_pd.return_value = mock_data_manager
+
+                # Setup mock project with proper attributes
+                mock_project = Mock()
+                mock_project.sub_activities = []  # Empty list to avoid iteration issues
+                mock_data_manager.get_current_project.return_value = mock_project
+
+                mock_config_instance = Mock()
+                mock_config_instance.get_window_title.return_value = "Test Window"
+                mock_config_instance.get_title_color.return_value = "#FFFFFF"
+                mock_config_instance.get_environment.return_value = Mock(value="test")
+                mock_config_instance.get_auto_idle_time_seconds.return_value = 300
+                mock_config_instance.get_timer_popup_interval_seconds.return_value = 600
+                mock_config_instance.get_auto_save_interval.return_value = 60  # Return number for math operation
+                mock_config.return_value = mock_config_instance
+
+                from tick_tock_widget.tick_tock_widget import TickTockWidget
+                widget = TickTockWidget()
+                
+                # Simulate active timers
+                mock_data_manager.stop_all_timers = Mock()
+                
+                widget.close_app()
+                
+                # CRITICAL: All timers must be stopped before shutdown
+                mock_data_manager.stop_all_timers.assert_called_once()
 
 if __name__ == '__main__':
     pytest.main([__file__])

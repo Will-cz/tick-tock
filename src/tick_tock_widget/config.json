@@ -3,7 +3,7 @@
   "data_files": {
     "development": "user_data/tick_tock_projects_dev.json",
     "production": "user_data/tick_tock_projects.json",
-    "test": "user_data/tick_tock_projects_test.json",
+    "test": "tests/fixtures/test_data.json",
     "prototype": "user_data/tick_tock_projects_prototype.json"
   },
   "environment_display": {
@@ -36,18 +36,21 @@
   "ui_settings": {
     "tree_states": {
       "project_management": {
-        "project_Project 1": 1,
-        "project_Project 2": 0,
-        "project_Project 3": 1,
-        "project_Project 4": 0,
-        "project_Project 5": 0,
-        "project_Project 6": 0,
-        "project_Project 7": 1
-      },
-      "monthly_report": {
+        "project1": true,
+        "project2": false,
+        "subitem1": true,
         "project_Project 1": 1,
         "project_Project 2": 1,
         "project_Project 3": 1,
+        "project_Project 4": 1,
+        "project_Project 5": 1,
+        "project_Project 6": 1,
+        "project_Project 7": 1
+      },
+      "monthly_report": {
+        "project_Project 1": 0,
+        "project_Project 2": 0,
+        "project_Project 3": 0,
         "project_Project 4": 0,
         "project_Project 5": 0,
         "project_Project 6": 0,

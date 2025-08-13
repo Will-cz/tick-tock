@@ -385,8 +385,25 @@ class MinimizedTickTockWidget:
             project = next((p for p in self.data_manager.projects
                           if p.alias == selected_alias), None)
             if project:
-                self.data_manager.current_project_alias = project.alias
+                # Use proper project setting method that clears sub-activity
+                self.data_manager.set_current_project(selected_alias)
+                
+                # Stop all running timers and start new project timer (like main widget)
+                self.data_manager.stop_all_timers()
+                
+                # Auto-start timer for the newly selected project
+                if self.data_manager.start_current_timer():
+                    print(f"Timer started for project: {selected_alias}")
+                
+                # Update both minimized and parent widget displays
                 self.update_project_display()
+                
+                # Notify parent widget to update its display if it has the method
+                if hasattr(self.parent_widget, 'update_project_display'):
+                    try:
+                        self.parent_widget.update_project_display()
+                    except (AttributeError, RuntimeError):
+                        pass  # Parent widget might not be accessible
         except (AttributeError, ValueError, StopIteration) as e:
             print(f"Error selecting project: {e}")
             self.update_project_display()  # Try to refresh display
@@ -401,15 +418,42 @@ class MinimizedTickTockWidget:
 
             activity_name = self.activity_combobox.get()
             if not activity_name:
+                # If no activity selected, clear current sub-activity and start main project timer
+                self.data_manager.stop_all_timers()
+                self.data_manager.set_current_sub_activity(None)
+                if self.data_manager.start_current_timer():
+                    print(f"Started main project timer: {current_project.alias}")
+                    
+                # Notify parent widget to update its display
+                if hasattr(self.parent_widget, 'update_project_display'):
+                    try:
+                        self.parent_widget.update_project_display()
+                    except (AttributeError, RuntimeError):
+                        pass  # Parent widget might not be accessible
                 return
 
             activity = next((sub for sub in current_project.sub_activities
                             if sub.name == activity_name), None)
             if activity:
-                # Stop any other running activities
+                # Stop all timers and start the selected sub-activity
                 self.data_manager.stop_all_timers()
-                # Start the selected activity
-                activity.get_today_record().start_timing()
+                
+                # Set current sub-activity using proper method
+                if self.data_manager.set_current_sub_activity(activity.alias):
+                    # Start timer using data manager method
+                    if self.data_manager.start_current_timer():
+                        print(f"Started timer for sub-activity: {current_project.alias} -> {activity.alias}")
+                else:
+                    # Fallback to direct method if alias not recognized
+                    activity.get_today_record().start_timing()
+                    print(f"Started timer for sub-activity (direct): {current_project.alias} -> {activity.alias}")
+                    
+                # Notify parent widget to update its display if it has the method
+                if hasattr(self.parent_widget, 'update_project_display'):
+                    try:
+                        self.parent_widget.update_project_display()
+                    except (AttributeError, RuntimeError):
+                        pass  # Parent widget might not be accessible
         except (AttributeError, ValueError, StopIteration) as e:
             print(f"Error selecting activity: {e}")
             self.update_project_display()  # Try to refresh display

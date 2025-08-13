@@ -366,17 +366,18 @@ class TestProjectDataManager:
     """Test ProjectDataManager class"""
     
     @patch('tick_tock_widget.project_data.get_config')
-    def test_init_default(self, mock_get_config):
+    def test_init_default(self, mock_get_config, temp_config_dir):
         """Test ProjectDataManager initialization with defaults"""
         mock_config = Mock()
-        mock_config.get_data_file.return_value = "test_data.json"
+        test_data_file = temp_config_dir / "test_data.json"
+        mock_config.get_data_file.return_value = str(test_data_file)
         mock_config.get_auto_save_interval.return_value = 300
         mock_get_config.return_value = mock_config
         
         with patch.object(ProjectDataManager, 'load_projects', return_value=True):
             manager = ProjectDataManager()
             
-            assert manager.data_file == Path("test_data.json")
+            assert manager.data_file == test_data_file
             assert manager.projects == []
             assert manager.current_project_alias is None
             assert manager.current_sub_activity_alias is None
@@ -493,16 +494,65 @@ class TestProjectDataManager:
                 assert len(data["projects"]) == 1
                 assert data["projects"][0]["name"] == "Test"
                 assert data["projects"][0]["alias"] == "T"
+
+    def test_save_projects_timing_behavior(self, temp_config_dir):
+        """Test the timing behavior that was fixed in the auto-save bug"""
+        from datetime import datetime, timedelta
+        
+        data_file = temp_config_dir / "timing_test.json"
+        
+        with patch('tick_tock_widget.project_data.get_config') as mock_get_config, \
+             patch('tick_tock_widget.project_data.datetime') as mock_datetime:
+            
+            mock_config = Mock()
+            mock_config.get_auto_save_interval.return_value = 300  # 5 minutes
+            mock_config.is_backup_enabled.return_value = False
+            mock_config.get_environment.return_value = Environment.TEST
+            mock_get_config.return_value = mock_config
+            
+            # Set up time mocking
+            base_time = datetime(2025, 8, 13, 12, 0, 0)
+            mock_datetime.now.return_value = base_time
+            
+            manager = ProjectDataManager(data_file=str(data_file))
+            manager.projects = []  # Start fresh
+            
+            # Set last save time to 2 minutes ago (less than 5 minute interval)
+            manager.last_save_time = base_time - timedelta(minutes=2)
+            
+            # Add a test project
+            project = Project(name="Test", dz_number="DZ123", alias="T", sub_activities=[], time_records={})
+            manager.projects.append(project)
+            
+            # Test 1: Non-forced save should fail when not enough time has passed
+            result = manager.save_projects(force=False)
+            assert result is False  # Should not save
+            assert not data_file.exists()  # File should not be created
+            
+            # Test 2: Forced save should work regardless of timing
+            result = manager.save_projects(force=True)
+            assert result is True  # Should save
+            assert data_file.exists()  # File should be created
+            
+            # Remove file for next test
+            data_file.unlink()
+            
+            # Test 3: Non-forced save should work when enough time has passed
+            mock_datetime.now.return_value = base_time + timedelta(minutes=6)  # 6 minutes later
+            result = manager.save_projects(force=False)
+            assert result is True  # Should save now
+            assert data_file.exists()  # File should be created
     
-    def test_add_project(self):
+    def test_add_project(self, temp_config_dir):
         """Test adding a new project"""
         with patch('tick_tock_widget.project_data.get_config') as mock_get_config:
             # Configure the mock config
             mock_config = Mock()
-            mock_config.get_data_file.return_value = "test_data.json"
+            test_data_file = temp_config_dir / "test_data.json"
+            mock_config.get_data_file.return_value = str(test_data_file)
             mock_config.get_auto_save_interval.return_value = 300
             mock_config.is_backup_enabled.return_value = True
-            mock_config.get_backup_directory.return_value = "backups"
+            mock_config.get_backup_directory.return_value = temp_config_dir / "backups"
             mock_config.get_max_backups.return_value = 10
             mock_get_config.return_value = mock_config
             
@@ -518,15 +568,16 @@ class TestProjectDataManager:
                 assert project.dz_number == "DZ123"
                 assert project.alias == "TP"
     
-    def test_add_project_duplicate_alias(self):
+    def test_add_project_duplicate_alias(self, temp_config_dir):
         """Test adding project with duplicate alias"""
         with patch('tick_tock_widget.project_data.get_config') as mock_get_config:
             # Configure the mock config
             mock_config = Mock()
-            mock_config.get_data_file.return_value = "test_data.json"
+            test_data_file = temp_config_dir / "test_data.json"
+            mock_config.get_data_file.return_value = str(test_data_file)
             mock_config.get_auto_save_interval.return_value = 300
             mock_config.is_backup_enabled.return_value = True
-            mock_config.get_backup_directory.return_value = "backups"
+            mock_config.get_backup_directory.return_value = temp_config_dir / "backups"
             mock_config.get_max_backups.return_value = 10
             mock_get_config.return_value = mock_config
             

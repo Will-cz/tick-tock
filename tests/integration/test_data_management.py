@@ -407,3 +407,21 @@ class TestConfigIntegration:
             loaded_state = config2.get_tree_state("project_management")
             
             assert loaded_state == tree_state
+
+    def test_test_environment_uses_fixtures_directory(self):
+        """Test that test environment correctly uses tests/fixtures/ directory"""
+        # Use the actual default config file
+        config = Config()
+        
+        # Get test environment data file
+        test_data_file = config.get_data_file(Environment.TEST)
+        
+        # Verify it points to tests/fixtures/test_data.json (handle both Windows and Unix paths)
+        normalized_path = test_data_file.replace("\\", "/")
+        assert "tests/fixtures/test_data.json" in normalized_path
+        assert normalized_path.endswith("tests/fixtures/test_data.json")
+        
+        # Verify the path exists (should be auto-created by our fixtures)
+        test_data_path = Path(test_data_file)
+        assert test_data_path.parent.name == "fixtures"
+        assert test_data_path.parent.parent.name == "tests"
