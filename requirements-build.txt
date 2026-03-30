@@ -1,0 +1,5 @@
+# Tick-Tock Widget - Build Dependencies
+# Install these to produce the distributable Windows EXE.
+
+-r requirements.txt
+pyinstaller>=6.10.0

@@ -1,0 +1,13 @@
+# Tick-Tock Widget - Development Dependencies
+# Python 3.8+
+
+# Testing
+-r requirements-test.txt
+
+# Code Quality
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.0.0
+
+# Pre-commit hooks
+pre-commit>=3.0.0

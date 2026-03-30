@@ -1,0 +1,53 @@
+# Tick-Tock runtime data (generated locally)
+data/*
+!data/.gitkeep
+
+# Python bytecode and native artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+
+# Virtual environments and local env files
+.venv/
+venv/
+env/
+ENV/
+.env
+.env.*
+
+# Packaging/build outputs
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Test/tool caches and reports
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Local temporary/runtime leftovers
+*.log
+*.tmp
+*.temp
+*.swp
+*.swo
+*.sqlite
+*.sqlite3
+
+# IDE/editor folders (local machine settings)
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
