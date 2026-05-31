@@ -530,12 +530,15 @@ class TickTockWidget(DragMixin):
 
         settings_btn = tk.Button(
             title_bar,
-            text="⚙",
+            # Segoe MDL2 Assets E713 = Setting gear. Ships on Win10/11
+            # and renders as a proper cog (U+2699 in Segoe UI Symbol
+            # looks like a thin ship's wheel on some systems).
+            text="\ue713",
             bg=t.btn_bg,
             fg=t.fg_dim,
             activebackground=t.btn_active,
             activeforeground=t.fg,
-            font=("Arial", 10),
+            font=("Segoe MDL2 Assets", 10),
             bd=0,
             width=2,
             command=self._open_settings_dialog,

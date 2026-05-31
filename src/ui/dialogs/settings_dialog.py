@@ -150,10 +150,12 @@ class SettingsDialog(BaseDialog):
 
         self._title_icon_label = tk.Label(
             title_bar,
-            text="⚙",
+            # Segoe MDL2 Assets E713 = Setting gear icon. Shipped with
+            # every Win10/11 install and renders as a proper cog.
+            text="\ue713",
             bg=t.bg,
             fg=t.fg_dim,
-            font=("Arial", 10),
+            font=("Segoe MDL2 Assets", 10),
         )
         self._title_icon_label.pack(side="left", padx=(6, 3))
 
