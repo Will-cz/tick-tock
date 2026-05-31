@@ -45,6 +45,7 @@ class MinimizedWidget(DragMixin):
         on_sub_switch: Callable[[int], None],
         on_maximize: Callable[[int, int], None],
         active_sub_id_getter: Optional[Callable[[], Optional[int]]] = None,
+        today_total_getter: Optional[Callable[[], float]] = None,
         start_x: int = 0,
         start_y: int = 0,
     ) -> None:
@@ -58,6 +59,7 @@ class MinimizedWidget(DragMixin):
         self._on_sub_switch = on_sub_switch
         self._on_maximize = on_maximize
         self._get_active_sub_id = active_sub_id_getter or (lambda: None)
+        self._get_today_total = today_total_getter
 
         self._clock_job: Optional[str] = None
         self._drag_pending_job: Optional[str] = None
@@ -318,10 +320,18 @@ class MinimizedWidget(DragMixin):
         self._clock_job = win.after(1000, self._tick)
 
     def refresh_display(self) -> None:
-        """Refresh elapsed label and toggle button from current timer state."""
+        """Refresh elapsed label and toggle button from current timer state.
+
+        The elapsed label shows today's total for the active project
+        (persisted today-base + any live in-progress delta), not the
+        lifetime timer value.
+        """
         t = self._theme
         state = self._timer.state
-        elapsed = self._timer.elapsed
+        if self._get_today_total is not None:
+            elapsed = float(self._get_today_total())
+        else:
+            elapsed = self._timer.elapsed
         poc_stop_red = "#FF4444"
 
         if self._elapsed_lbl:

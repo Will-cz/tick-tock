@@ -1151,6 +1151,7 @@ class TickTockWidget(DragMixin):
             on_sub_switch=self._on_tree_select_sub_activity,
             on_maximize=self._restore,
             active_sub_id_getter=lambda: self._active_sub_activity_id,
+            today_total_getter=self.get_today_display_total,
             start_x=x,
             start_y=y,
         )
@@ -1716,6 +1717,16 @@ class TickTockWidget(DragMixin):
         if active_project is None:
             return
 
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        today_by_sub: dict[int, float] = {}
+        if self._storage is not None:
+            today_by_sub = self._storage.get_daily_seconds_by_sub_activity(
+                today_str, active_project.project_id
+            )
+        _live_pid, live_delta = self._get_live_daily_segment()
+        if _live_pid != active_project.project_id:
+            live_delta = 0.0
+
         rows = build_sub_activity_tree_rows(
             sub_rows=(
                 self._app_service.list_sub_activities(active_project.project_id)
@@ -1725,6 +1736,8 @@ class TickTockWidget(DragMixin):
             project_id=active_project.project_id,
             active_sub_activity_id=self._active_sub_activity_id,
             timer_state=self._timer.state,
+            today_seconds_by_sub=today_by_sub,
+            live_active_delta=live_delta,
         )
 
         for row in rows:
@@ -1848,12 +1861,21 @@ class TickTockWidget(DragMixin):
         self._projects_tree_iids.clear()
 
         active = self._project_mgr.active_project
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        today_by_project: dict[int, float] = {}
+        if self._storage is not None:
+            today_by_project = self._storage.get_daily_seconds_by_project(today_str)
+        _live_pid, live_delta = self._get_live_daily_segment()
+        if active is None or _live_pid != active.project_id:
+            live_delta = 0.0
+
         rows = build_project_tree_rows(
             projects=self._project_mgr.projects,
             active_project_id=(active.project_id if active is not None else None),
             active_sub_activity_id=self._active_sub_activity_id,
             timer_state=self._timer.state,
-            timer_elapsed=self._timer.elapsed,
+            today_seconds_by_project=today_by_project,
+            live_active_delta=live_delta,
         )
 
         for row in rows:
@@ -1904,12 +1926,22 @@ class TickTockWidget(DragMixin):
             return
 
         active = self._project_mgr.active_project
+        active_pid = active.project_id if active is not None else None
+        today_base = 0.0
+        if active_pid is not None and self._storage is not None:
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            today_base = self._storage.get_daily_total(today_str, project_id=active_pid)
+        _live_pid, live_delta = self._get_live_daily_segment()
+        if _live_pid != active_pid:
+            live_delta = 0.0
+
         update = resolve_projects_tree_live_update(
             panel_tab=self._panel_tab,
             project_tree_iids=self._projects_tree_iids,
-            active_project_id=(active.project_id if active is not None else None),
+            active_project_id=active_pid,
             timer_state=self._timer.state,
-            timer_elapsed=self._timer.elapsed,
+            today_base_seconds=today_base,
+            live_active_delta=live_delta,
         )
         if update is None:
             return
@@ -1929,11 +1961,31 @@ class TickTockWidget(DragMixin):
         if self._tree is None:
             return
 
+        today_base = 0.0
+        active_pid: Optional[int] = None
+        if (
+            self._active_sub_activity_id is not None
+            and self._project_mgr is not None
+            and self._storage is not None
+        ):
+            active = self._project_mgr.active_project
+            active_pid = active.project_id if active is not None else None
+            if active_pid is not None:
+                today_str = datetime.now().strftime("%Y-%m-%d")
+                today_map = self._storage.get_daily_seconds_by_sub_activity(
+                    today_str, active_pid
+                )
+                today_base = float(today_map.get(self._active_sub_activity_id, 0.0))
+        _live_pid, live_delta = self._get_live_daily_segment()
+        if _live_pid != active_pid:
+            live_delta = 0.0
+
         update = resolve_sub_activity_tree_live_update(
             sub_tree_iids=self._sub_tree_iids,
             active_sub_activity_id=self._active_sub_activity_id,
             timer_state=self._timer.state,
-            timer_elapsed=self._timer.elapsed,
+            today_base_seconds=today_base,
+            live_active_delta=live_delta,
         )
         if update is None:
             return
@@ -2126,6 +2178,16 @@ class TickTockWidget(DragMixin):
         """Refresh the 'Today: HH:MM:SS' label with live running total."""
         if self._today_label is None or self._app_service is None:
             return
+        total = self.get_today_display_total()
+        self._today_label.config(text=format_elapsed(total, pad_hours=True))
+
+    def get_today_display_total(self) -> float:
+        """Return today's display total (persisted base + live in-progress delta).
+
+        Returns ``0.0`` when no app service or active project is available.
+        """
+        if self._app_service is None:
+            return 0.0
         active_project_id: Optional[int] = None
         if (
             self._project_mgr is not None
@@ -2137,13 +2199,12 @@ class TickTockWidget(DragMixin):
             app_service=self._app_service,
             active_project_id=active_project_id,
         )
-        total = compute_today_display_total(
+        return compute_today_display_total(
             cache=self._today_cache,
             timer_running=self._timer.state == TimerState.RUNNING,
             timer_elapsed=self._timer.elapsed,
             last_saved_daily_elapsed=self._controller.get_last_saved_daily_elapsed(),
         )
-        self._today_label.config(text=format_elapsed(total, pad_hours=True))
 
     def _refresh_today_base_total(self, *, force: bool = False) -> None:
         """Refresh cached persisted active-project total for today when needed."""

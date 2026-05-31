@@ -217,6 +217,11 @@ class TestDialogListHelpers:
         mgr = SubActivityManager(storage, project_id)
         sa = mgr.add("Live Sub")
         mgr.save_elapsed(sa.sub_activity_id, 300.0)
+        # Persist 80s of today's sub-activity time so the row has a non-zero
+        # today base in addition to the live overlay.
+        storage.add_daily_sub_activity_seconds(
+            project_id, sa.sub_activity_id, today_text, 80.0
+        )
 
         d = ProjectManagementDialog(
             root_tk,
@@ -230,7 +235,7 @@ class TestDialogListHelpers:
         project_row = d._listbox.get(0)
         sub_row = d._listbox.get(1)
         assert format_elapsed(165.0, pad_hours=False) in project_row
-        assert format_elapsed(345.0, pad_hours=False) in sub_row
+        assert format_elapsed(125.0, pad_hours=False) in sub_row
         d.close()
 
 

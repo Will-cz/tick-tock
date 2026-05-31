@@ -828,11 +828,14 @@ class ProjectManagementDialog(BaseDialog):
 
             if not self._svc.available or not is_expanded:
                 continue
+            sub_today_map = self._svc.get_daily_seconds_by_sub_activity(
+                today, p.project_id
+            )
             for row in self._svc.list_sub_activities(p.project_id):
                 if row["archived"] and not show_arch:
                     continue
                 sa_name = row["name"][:20]
-                sa_elapsed = float(row["elapsed_seconds"])
+                sa_elapsed = float(sub_today_map.get(int(row["id"]), 0.0))
                 if (
                     live_project_id == p.project_id
                     and active_sub_id is not None

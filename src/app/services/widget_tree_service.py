@@ -113,9 +113,18 @@ def build_sub_activity_tree_rows(
     project_id: int,
     active_sub_activity_id: Optional[int],
     timer_state: TimerState,
+    today_seconds_by_sub: Optional[Mapping[int, float]] = None,
+    live_active_delta: float = 0.0,
 ) -> list[SubActivityTreeRow]:
-    """Build sub-activity tree rows with active/playing visual state."""
+    """Build sub-activity tree rows showing today's elapsed time.
+
+    ``today_seconds_by_sub`` maps sub-activity ids to seconds already
+    persisted in ``daily_sub_time_log`` for today. ``live_active_delta`` is
+    added to the active sub-activity's row so it ticks up while the timer
+    is running.
+    """
     timer_running = timer_state == TimerState.RUNNING
+    today_map = today_seconds_by_sub or {}
     rows: list[SubActivityTreeRow] = []
 
     for raw in sub_rows:
@@ -123,12 +132,15 @@ def build_sub_activity_tree_rows(
             continue
         sub_activity_id = _coerce_int(raw.get("id", 0), default=0)
         is_active = active_sub_activity_id == sub_activity_id
+        elapsed = float(today_map.get(sub_activity_id, 0.0))
+        if is_active:
+            elapsed += max(0.0, float(live_active_delta))
         rows.append(
             SubActivityTreeRow(
                 sub_activity_id=sub_activity_id,
                 project_id=project_id,
                 name=str(raw.get("name", "")),
-                elapsed_seconds=_coerce_float(raw.get("elapsed_seconds", 0.0)),
+                elapsed_seconds=elapsed,
                 tag="active_sub" if is_active else "sub",
                 action=_ACTION_PAUSE if (is_active and timer_running) else _ACTION_PLAY,
             )
@@ -143,19 +155,27 @@ def build_project_tree_rows(
     active_project_id: Optional[int],
     active_sub_activity_id: Optional[int],
     timer_state: TimerState,
-    timer_elapsed: float,
+    today_seconds_by_project: Optional[Mapping[int, float]] = None,
+    live_active_delta: float = 0.0,
 ) -> list[ProjectTreeRow]:
-    """Build project tree rows with active/playing visual state."""
+    """Build project tree rows showing today's elapsed time per project.
+
+    ``today_seconds_by_project`` maps project ids to seconds already
+    persisted in ``daily_time_log`` for today. ``live_active_delta`` is
+    added to the active project's row regardless of whether a sub-activity
+    is selected, so the row ticks up while the timer is running.
+    """
+    today_map = today_seconds_by_project or {}
+    _ = active_sub_activity_id  # currently unused; kept for API stability
     rows: list[ProjectTreeRow] = []
 
     for project in projects:
         if project.archived:
             continue
         is_active = project.project_id == active_project_id
-        if is_active and active_sub_activity_id is None:
-            elapsed = timer_elapsed
-        else:
-            elapsed = project.elapsed_seconds
+        elapsed = float(today_map.get(project.project_id, 0.0))
+        if is_active:
+            elapsed += max(0.0, float(live_active_delta))
         timer_running = is_active and timer_state == TimerState.RUNNING
         rows.append(
             ProjectTreeRow(
@@ -205,9 +225,14 @@ def resolve_projects_tree_live_update(
     project_tree_iids: Mapping[int, str],
     active_project_id: Optional[int],
     timer_state: TimerState,
-    timer_elapsed: float,
+    today_base_seconds: float = 0.0,
+    live_active_delta: float = 0.0,
 ) -> Optional[ProjectTreeLiveUpdate]:
-    """Resolve live update payload for the active project row, if any."""
+    """Resolve live update payload for the active project row, if any.
+
+    Elapsed value is ``today_base_seconds + max(0, live_active_delta)`` so the
+    row continues to display today's total as it ticks up.
+    """
     if panel_tab != "projects" or active_project_id is None:
         return None
 
@@ -215,9 +240,10 @@ def resolve_projects_tree_live_update(
     if iid is None:
         return None
 
+    elapsed = float(today_base_seconds) + max(0.0, float(live_active_delta))
     return ProjectTreeLiveUpdate(
         iid=iid,
-        elapsed_seconds=timer_elapsed,
+        elapsed_seconds=elapsed,
         action=_ACTION_PAUSE if timer_state == TimerState.RUNNING else _ACTION_PLAY,
     )
 
@@ -227,9 +253,14 @@ def resolve_sub_activity_tree_live_update(
     sub_tree_iids: Mapping[int, str],
     active_sub_activity_id: Optional[int],
     timer_state: TimerState,
-    timer_elapsed: float,
+    today_base_seconds: float = 0.0,
+    live_active_delta: float = 0.0,
 ) -> Optional[SubActivityTreeLiveUpdate]:
-    """Resolve live update payload for the active sub-activity row, if any."""
+    """Resolve live update payload for the active sub-activity row, if any.
+
+    Elapsed value is ``today_base_seconds + max(0, live_active_delta)`` so the
+    row continues to display today's total as it ticks up.
+    """
     if active_sub_activity_id is None:
         return None
 
@@ -237,9 +268,10 @@ def resolve_sub_activity_tree_live_update(
     if iid is None:
         return None
 
+    elapsed = float(today_base_seconds) + max(0.0, float(live_active_delta))
     return SubActivityTreeLiveUpdate(
         iid=iid,
-        elapsed_seconds=timer_elapsed,
+        elapsed_seconds=elapsed,
         action=_ACTION_PAUSE if timer_state == TimerState.RUNNING else _ACTION_PLAY,
     )
 

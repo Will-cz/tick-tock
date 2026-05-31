@@ -23,12 +23,15 @@ def test_build_sub_activity_tree_rows_filters_archived_and_marks_active() -> Non
         project_id=7,
         active_sub_activity_id=1,
         timer_state=TimerState.RUNNING,
+        today_seconds_by_sub={1: 120.0},
+        live_active_delta=3.0,
     )
 
     assert len(rows) == 1
     row = rows[0]
     assert row.project_id == 7
     assert row.sub_activity_id == 1
+    assert row.elapsed_seconds == 123.0
     assert row.tag == "active_sub"
     assert row.action == "\u23f8"
 
@@ -39,14 +42,16 @@ def test_build_sub_activity_tree_rows_inactive_uses_play_symbol() -> None:
         project_id=8,
         active_sub_activity_id=None,
         timer_state=TimerState.PAUSED,
+        today_seconds_by_sub={3: 50.0},
     )
 
     assert len(rows) == 1
     assert rows[0].tag == "sub"
     assert rows[0].action == "\u25b6"
+    assert rows[0].elapsed_seconds == 50.0
 
 
-def test_build_project_tree_rows_active_project_uses_timer_elapsed() -> None:
+def test_build_project_tree_rows_active_project_uses_today_plus_live() -> None:
     projects = [
         Project(1, "P1", "", 10.0, "now"),
         Project(2, "P2", "", 20.0, "now"),
@@ -56,17 +61,20 @@ def test_build_project_tree_rows_active_project_uses_timer_elapsed() -> None:
         active_project_id=1,
         active_sub_activity_id=None,
         timer_state=TimerState.RUNNING,
-        timer_elapsed=33.0,
+        today_seconds_by_project={1: 100.0, 2: 75.0},
+        live_active_delta=5.0,
     )
 
     assert len(rows) == 2
     active = next(r for r in rows if r.project_id == 1)
-    assert active.elapsed_seconds == 33.0
+    other = next(r for r in rows if r.project_id == 2)
+    assert active.elapsed_seconds == 105.0
+    assert other.elapsed_seconds == 75.0
     assert active.tag == "active_proj"
     assert active.action == "\u23f8"
 
 
-def test_build_project_tree_rows_active_sub_uses_project_elapsed() -> None:
+def test_build_project_tree_rows_active_sub_still_adds_live_to_project() -> None:
     projects = [
         Project(1, "P1", "", 10.0, "now"),
     ]
@@ -75,11 +83,12 @@ def test_build_project_tree_rows_active_sub_uses_project_elapsed() -> None:
         active_project_id=1,
         active_sub_activity_id=11,
         timer_state=TimerState.RUNNING,
-        timer_elapsed=40.0,
+        today_seconds_by_project={1: 40.0},
+        live_active_delta=2.5,
     )
 
     assert len(rows) == 1
-    assert rows[0].elapsed_seconds == 10.0
+    assert rows[0].elapsed_seconds == 42.5
     assert rows[0].action == "\u23f8"
 
 
@@ -93,12 +102,13 @@ def test_build_project_tree_rows_skips_archived() -> None:
         active_project_id=2,
         active_sub_activity_id=None,
         timer_state=TimerState.PAUSED,
-        timer_elapsed=20.0,
+        today_seconds_by_project={2: 60.0},
     )
 
     assert len(rows) == 1
     assert rows[0].project_id == 2
     assert rows[0].label == "Alias"
+    assert rows[0].elapsed_seconds == 60.0
     assert rows[0].action == "\u25b6"
 
 
@@ -156,7 +166,8 @@ def test_resolve_projects_tree_live_update_ignores_non_projects_tab() -> None:
         project_tree_iids={1: "iid-1"},
         active_project_id=1,
         timer_state=TimerState.RUNNING,
-        timer_elapsed=12.0,
+        today_base_seconds=10.0,
+        live_active_delta=2.0,
     )
     assert update is None
 
@@ -167,7 +178,8 @@ def test_resolve_projects_tree_live_update_ignores_missing_iid() -> None:
         project_tree_iids={2: "iid-2"},
         active_project_id=1,
         timer_state=TimerState.RUNNING,
-        timer_elapsed=12.0,
+        today_base_seconds=10.0,
+        live_active_delta=2.0,
     )
     assert update is None
 
@@ -178,7 +190,8 @@ def test_resolve_projects_tree_live_update_returns_pause_action_when_running() -
         project_tree_iids={1: "iid-1"},
         active_project_id=1,
         timer_state=TimerState.RUNNING,
-        timer_elapsed=12.0,
+        today_base_seconds=10.0,
+        live_active_delta=2.0,
     )
     assert update is not None
     assert update.iid == "iid-1"
@@ -192,7 +205,8 @@ def test_resolve_projects_tree_live_update_returns_play_action_when_paused() -> 
         project_tree_iids={1: "iid-1"},
         active_project_id=1,
         timer_state=TimerState.PAUSED,
-        timer_elapsed=12.0,
+        today_base_seconds=12.0,
+        live_active_delta=0.0,
     )
     assert update is not None
     assert update.action == "\u25b6"
@@ -203,7 +217,8 @@ def test_resolve_sub_activity_tree_live_update_missing_active_returns_none() -> 
         sub_tree_iids={1: "sa-1"},
         active_sub_activity_id=None,
         timer_state=TimerState.RUNNING,
-        timer_elapsed=10.0,
+        today_base_seconds=10.0,
+        live_active_delta=0.0,
     )
     assert update is None
 
@@ -213,7 +228,8 @@ def test_resolve_sub_activity_tree_live_update_returns_pause_when_running() -> N
         sub_tree_iids={1: "sa-1"},
         active_sub_activity_id=1,
         timer_state=TimerState.RUNNING,
-        timer_elapsed=10.0,
+        today_base_seconds=8.0,
+        live_active_delta=2.0,
     )
     assert update is not None
     assert update.iid == "sa-1"

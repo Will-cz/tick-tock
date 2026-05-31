@@ -118,6 +118,21 @@ class TimeLogMixin:
             )
         return {int(r[0]): float(r[1]) for r in rows}
 
+    def get_daily_seconds_by_sub_activity(
+        self: _TimeLogStorage, date_str: str, project_id: int
+    ) -> dict[int, float]:
+        """Return ``{sub_activity_id: seconds}`` for *project_id* on *date*."""
+        with self.connect() as conn:
+            rows = cast(
+                list[tuple[Any, Any]],
+                conn.execute(
+                    "SELECT sub_activity_id, seconds FROM daily_sub_time_log"
+                    " WHERE date = ? AND project_id = ?",
+                    (date_str, project_id),
+                ).fetchall(),
+            )
+        return {int(r[0]): float(r[1]) for r in rows}
+
     def get_monthly_data(
         self: _TimeLogStorage,
         year: int,
