@@ -538,7 +538,7 @@ class TickTockWidget(DragMixin):
             fg=t.fg_dim,
             activebackground=t.btn_active,
             activeforeground=t.fg,
-            font=("Segoe MDL2 Assets", 10),
+            font=("Segoe MDL2 Assets", 12),
             bd=0,
             width=2,
             command=self._open_settings_dialog,
