@@ -2020,7 +2020,11 @@ class TickTockWidget(DragMixin):
             self._title_icon_label.config(fg=selector_state.title_color)
 
     def _on_combobox_project_select(self, _event: "tk.Event[tk.Misc]") -> None:
-        """Handle the user selecting a project from the dropdown combobox."""
+        """Handle the user selecting a project from the dropdown combobox.
+
+        Selecting a project from the combobox also auto-starts the timer
+        so the user does not need a separate click on the Start button.
+        """
         combo = self._project_combobox
         if combo is None or self._project_mgr is None:
             return
@@ -2030,6 +2034,8 @@ class TickTockWidget(DragMixin):
         )
         if selected_project_id is not None:
             self._on_project_switch(selected_project_id)
+            if self._timer.state != TimerState.RUNNING:
+                self._on_toggle()
 
     def _on_opacity_change(self, value: str) -> None:
         """Adjust window transparency live and persist the preference."""
@@ -2314,5 +2320,8 @@ class TickTockWidget(DragMixin):
                 self._stop_btn.config(state="disabled")
             else:
                 self._stop_btn.config(state="normal")
-        # Keep tree action column in sync with timer state
+        # Keep tree action columns in sync with timer state immediately so
+        # the play/pause glyph updates on click rather than on the next 1s
+        # clock tick.
         self._update_tree_active_time()
+        self._update_projects_tree_times()

@@ -449,6 +449,7 @@ class MinimizedWidget(DragMixin):
                 label = p.alias if p.alias else p.name
                 if label == selected:
                     self._on_project_switch(p.project_id)
+                    self._auto_start_after_select()
                     break
 
     def _on_activity_select(self, _event: "tk.Event") -> None:
@@ -463,12 +464,19 @@ class MinimizedWidget(DragMixin):
         selected = combo.get()
         if selected == self._PROJECT_LEVEL_LABEL:
             self._on_project_switch(active.project_id)
+            self._auto_start_after_select()
             return
         subs = self._storage.list_sub_activities(active.project_id)
         for row in subs:
             if row["name"] == selected and not row["archived"]:
                 self._on_sub_switch(row["id"])
+                self._auto_start_after_select()
                 break
+
+    def _auto_start_after_select(self) -> None:
+        """Start the timer after a combobox selection if not already running."""
+        if self._timer.state != TimerState.RUNNING:
+            self._on_toggle()
 
     def _maximize(self) -> None:
         win = self._win
