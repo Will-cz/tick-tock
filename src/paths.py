@@ -20,3 +20,12 @@ def user_data_dir() -> Path:
     if local_app_data:
         return Path(local_app_data) / "TickTock"
     return Path.home() / ".tick-tock"
+
+
+def repo_data_dir() -> Path:
+    """Return the repo-local data/ directory.
+
+    Used by dev and test environments so their databases stay inside the
+    project folder rather than the OS user-data directory.
+    """
+    return Path(__file__).parent.parent / "data"

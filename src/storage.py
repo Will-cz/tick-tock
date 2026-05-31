@@ -23,7 +23,7 @@ from src.infra.persistence.recovery import (
 from src.infra.persistence.sub_activity_mixin import SubActivityMixin
 from src.infra.persistence.time_log_mixin import TimeLogMixin
 from src.infra.persistence.timer_state_mixin import TimerStateMixin
-from src.paths import user_data_dir
+from src.paths import repo_data_dir, user_data_dir
 
 logger = logging.getLogger(__name__)
 
@@ -83,13 +83,14 @@ class Storage(
     def default_db_path() -> Path:
         """Default database path, isolated by runtime mode.
 
-        Filenames:
-        - prod: ``tick_tock.db``
-        - dev/test/prototype: ``tick_tock.<env>.db``
-
-        This resolves under ``user_data_dir()``.
+        Filenames and locations:
+        - prod:      ``tick_tock.db``           under ``user_data_dir()``
+        - prototype: ``tick_tock.prototype.db`` under ``user_data_dir()``
+        - dev/test:  ``tick_tock.<env>.db``     under ``repo_data_dir()``
         """
         env = Storage._current_env_mode()
+        if env in {"dev", "test"}:
+            return repo_data_dir() / f"tick_tock.{env}.db"
         name = "tick_tock.db" if env == "prod" else f"tick_tock.{env}.db"
         return user_data_dir() / name
 

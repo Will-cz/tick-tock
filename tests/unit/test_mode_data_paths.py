@@ -15,9 +15,9 @@ def test_storage_default_db_path_is_prod_when_env_unset(monkeypatch, tmp_path) -
 
 def test_storage_default_db_path_uses_dev_suffix(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("TICK_TOCK_ENV", "dev")
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr("src.storage.repo_data_dir", lambda: tmp_path)
 
-    assert Storage.default_db_path() == tmp_path / "TickTock" / "tick_tock.dev.db"
+    assert Storage.default_db_path() == tmp_path / "tick_tock.dev.db"
 
 
 def test_storage_default_backup_path_uses_mode_specific_db(
