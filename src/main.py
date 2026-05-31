@@ -104,8 +104,42 @@ def _show_fatal_crash_dialog(exc: Exception, log_path: Optional[Path]) -> None:
         logger.exception("Could not show fatal crash dialog")
 
 
+def _enable_windows_dpi_awareness() -> None:
+    """Declare the process as Per-Monitor V2 DPI aware on Windows.
+
+    Without this, dragging a borderless Tk window between monitors with
+    different scaling factors causes the cursor and the window origin to
+    drift apart, because Windows virtualises ``event.x_root`` and
+    ``winfo_x`` into different coordinate spaces.  Tries the most
+    precise mode first and falls back through older API levels.
+    No-op on non-Windows platforms.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes  # local import: only needed on Windows
+
+        # -4 = PROCESS_PER_MONITOR_DPI_AWARE_V2 (Win10 1703+).
+        try:
+            ctypes.windll.user32.SetProcessDpiAwarenessContext(-4)
+            return
+        except (AttributeError, OSError):
+            pass
+        # Fallback: PROCESS_PER_MONITOR_DPI_AWARE (Win 8.1+).
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+            return
+        except (AttributeError, OSError):
+            pass
+        # Last-resort: legacy system-DPI awareness (Win Vista+).
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:  # pylint: disable=broad-except
+        logger.debug("Could not enable Windows DPI awareness", exc_info=True)
+
+
 def main() -> int:
     """Main entry point for the Tick-Tock Widget application."""
+    _enable_windows_dpi_awareness()
     config = Config()
 
     log_level = logging.DEBUG if config.debug else logging.INFO

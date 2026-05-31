@@ -20,6 +20,12 @@ class DragMixin:
         """Initialise per-instance drag tracking variables."""
         self._drag_x: int = 0
         self._drag_y: int = 0
+        # Offset from the window's top-left corner to the mouse-down point,
+        # captured in screen coords. Using an absolute offset (instead of
+        # accumulating per-motion deltas) keeps drag rock-solid when the
+        # window crosses monitors with different DPI scaling.
+        self._drag_offset_x: int = 0
+        self._drag_offset_y: int = 0
         self._drag_pending_job: Optional[str] = None
         self._drag_target_pos: Optional[tuple[int, int]] = None
 
@@ -33,13 +39,19 @@ class DragMixin:
     def _drag_start(self, event: "tk.Event[tk.Misc]") -> None:
         self._drag_x = event.x_root
         self._drag_y = event.y_root
+        win = self._get_drag_window()
+        if win is not None:
+            self._drag_offset_x = event.x_root - win.winfo_x()
+            self._drag_offset_y = event.y_root - win.winfo_y()
 
     def _drag_motion(self, event: "tk.Event[tk.Misc]") -> None:
         win = self._get_drag_window()
         if win is None:
             return
-        x = win.winfo_x() + (event.x_root - self._drag_x)
-        y = win.winfo_y() + (event.y_root - self._drag_y)
+        # Absolute placement keeps the mouse-down point pinned to the window
+        # under the cursor, even across monitors with mixed DPI scaling.
+        x = event.x_root - self._drag_offset_x
+        y = event.y_root - self._drag_offset_y
         self._drag_target_pos = (x, y)
         if self._drag_pending_job is None:
             self._drag_pending_job = win.after_idle(self._apply_pending_drag_geometry)
