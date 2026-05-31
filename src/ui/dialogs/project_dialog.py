@@ -216,7 +216,7 @@ class ProjectManagementDialog(BaseDialog):
         list_frame.pack(fill="both", expand=True, padx=8, pady=(4, 4))
         tk.Label(
             list_frame,
-            text="Projects & Sub-Activities:",
+            text="Projects & Activities:",
             bg=bg,
             fg=fg_dim,
             font=("Arial", 9, "bold"),
@@ -383,10 +383,10 @@ class ProjectManagementDialog(BaseDialog):
         alias_entry.pack(side="left", fill="x", expand=True)
         alias_entry.bind("<Return>", lambda _e: self._on_save())
 
-        # Ref #
+        # DZ #
         row_ref = tk.Frame(f, bg=bg)
         row_ref.pack(fill="x", padx=8, pady=2)
-        _lbl(row_ref, "Ref #:").pack(side="left")
+        _lbl(row_ref, "DZ #:").pack(side="left")
         ref_entry = tk.Entry(row_ref, textvariable=self._ref_var, **entry_kw)
         ref_entry.pack(side="left", fill="x", expand=True)
         ref_entry.bind("<Return>", lambda _e: self._on_save())
