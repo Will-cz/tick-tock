@@ -1403,6 +1403,41 @@ class TickTockWidget(DragMixin):
     # Wall-clock jump (seconds) that indicates a system sleep/wake event.
     _SLEEP_DETECT_THRESHOLD = 5.0
 
+    def _reassert_window_visibility_after_wake(self) -> None:
+        """Re-enforce window visibility invariants after a sleep/wake event.
+
+        Invariant: the main root window and the compact mini widget are
+        never visible at the same time. After a Windows suspend/resume
+        cycle, Tk sometimes restores a previously-withdrawn root window,
+        producing two simultaneously visible application windows. This
+        method detects that condition and re-applies the intended state.
+        """
+        root = self._root
+        if root is None:
+            return
+        try:
+            root_state = root.state()
+        except tk.TclError:
+            return
+        mini = self._minimized_widget
+        mini_alive = False
+        if mini is not None:
+            mini_win = getattr(mini, "_win", None)
+            try:
+                mini_alive = bool(mini_win is not None and mini_win.winfo_exists())
+            except tk.TclError:
+                mini_alive = False
+        if mini_alive and root_state != "withdrawn":
+            try:
+                root.withdraw()
+            except tk.TclError:
+                pass
+        elif not mini_alive and mini is not None:
+            # Stale reference: mini window was destroyed by the OS but the
+            # back-reference was not cleared. Clear it so future restores
+            # behave correctly.
+            self._minimized_widget = None
+
     def _tick_clock(self) -> None:
         root = self._root
         if root is None:
@@ -1414,16 +1449,19 @@ class TickTockWidget(DragMixin):
         # threshold between two consecutive ticks the system likely slept.
         if self._last_tick_wall_time is not None:
             gap = (now - self._last_tick_wall_time).total_seconds()
-            if (
-                gap > self._SLEEP_DETECT_THRESHOLD
-                and self._timer.state == TimerState.RUNNING
-            ):
-                logger.info(
-                    "System sleep/wake detected (gap %.1fs) — pausing timer.", gap
-                )
-                # Preserve elapsed at the last known active value so a long
-                # suspend gap is never counted as worked time.
-                self._timer.pause(preserve_elapsed=True)
+            if gap > self._SLEEP_DETECT_THRESHOLD:
+                if self._timer.state == TimerState.RUNNING:
+                    logger.info(
+                        "System sleep/wake detected (gap %.1fs) — pausing timer.",
+                        gap,
+                    )
+                    # Preserve elapsed at the last known active value so a long
+                    # suspend gap is never counted as worked time.
+                    self._timer.pause(preserve_elapsed=True)
+                # Re-assert window visibility: Windows can occasionally
+                # restore a withdrawn Tk root after resume, leaving both the
+                # main window and the compact mini visible at the same time.
+                self._reassert_window_visibility_after_wake()
         self._last_tick_wall_time = now
 
         # Handle midnight date change while timer is running
