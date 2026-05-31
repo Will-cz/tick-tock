@@ -139,21 +139,6 @@ def sanitize_loaded_config(
             "activity_history_retention_days"
         ]
 
-    activity_max = ts_cfg.get("activity_log_max_entries")
-    try:
-        activity_max = coerce_int(activity_max)
-        if activity_max < 1:
-            raise ValueError("must be >= 1")
-        ts_cfg["activity_log_max_entries"] = activity_max
-    except (TypeError, ValueError):
-        logger.warning(
-            "Config: invalid activity_log_max_entries %r, resetting to default",
-            ts_cfg.get("activity_log_max_entries"),
-        )
-        ts_cfg["activity_log_max_entries"] = defaults["timer_settings"][
-            "activity_log_max_entries"
-        ]
-
     if not isinstance(config.get("theme"), dict):
         logger.warning("Config: theme is invalid, resetting to defaults")
         config["theme"] = copy.deepcopy(defaults["theme"])

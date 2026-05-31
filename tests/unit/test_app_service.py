@@ -53,7 +53,8 @@ class TestTimerState:
         svc.save_timer_state(42.5, "running")
         state = svc.load_timer_state()
         assert state is not None
-        assert abs(state["elapsed_seconds"] - 42.5) < 0.01
+        # Seconds are persisted as INTEGER; fractional input is truncated.
+        assert state["elapsed_seconds"] == 42
         assert state["state"] == "running"
 
     def test_clear_timer_state(self, svc: AppService):
@@ -63,10 +64,6 @@ class TestTimerState:
 
     def test_load_timer_state_when_empty_returns_none(self, svc: AppService):
         assert svc.load_timer_state() is None
-
-    def test_log_activity_does_not_raise(self, svc: AppService):
-        """log_activity should write without error."""
-        svc.log_activity("start", "My Project")  # no assertion - fire and forget
 
 
 # ---------------------------------------------------------------------------

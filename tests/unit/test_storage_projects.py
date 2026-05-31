@@ -50,7 +50,8 @@ class TestProjectCrud:
         pid = storage.create_project("Work", "")
         storage.save_project_elapsed(pid, 1234.5)
         row = storage.list_projects()[0]
-        assert row["elapsed_seconds"] == pytest.approx(1234.5)
+        # Seconds are persisted as INTEGER; fractional input is truncated.
+        assert row["elapsed_seconds"] == 1234
 
     def test_save_elapsed_overwrites(self, storage):
         pid = storage.create_project("Work", "")

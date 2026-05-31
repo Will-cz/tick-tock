@@ -9,7 +9,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import ContextManager, Optional
 
-from src.infra.persistence.activity_log_mixin import ActivityLogMixin
 from src.infra.persistence.import_export_mixin import ImportExportMixin
 from src.infra.persistence.migrations import (
     apply_migrations as apply_schema_migrations,
@@ -30,30 +29,35 @@ logger = logging.getLogger(__name__)
 
 class Storage(
     TimerStateMixin,
-    ActivityLogMixin,
     ProjectMixin,
     SubActivityMixin,
     TimeLogMixin,
     ImportExportMixin,
 ):
-    """Persists timer state and activity log to a SQLite database.
+    """Persists timer state and per-day project/sub-activity totals to SQLite.
 
-    Two tables:
+    Core tables:
 
-    - ``timer_state``: single row with current elapsed seconds and state.
-    - ``activity_log``: append-only log of timer events with timestamps.
+    - ``timer_state``: single-row snapshot of the live timer.
+    - ``projects`` / ``sub_activities``: master records with a resume-position
+      ``elapsed_seconds`` value used to seed the timer when the user switches
+      between them.
+    - ``daily_time_log`` / ``daily_sub_time_log``: per-day accumulated seconds;
+      lifetime totals are computed as ``SUM(seconds)`` over these tables.
+    - ``app_state``: small key/value bag (active project id, etc.).
+
+    All persisted second values are stored as whole-second integers.
 
     Usage::
 
         storage = Storage(Path("tick_tock.db"))
-        storage.save_timer_state(elapsed=42.7, state="stopped")
-        state = storage.load_timer_state()  # {"elapsed_seconds": 42.7, ...}
-        storage.log_activity("start")
+        storage.save_timer_state(elapsed=42, state="stopped")
+        state = storage.load_timer_state()  # {"elapsed_seconds": 42, ...}
     """
 
     # Current schema version.  Increment this and add a migration entry in
-    # ``_MIGRATIONS`` whenever the database structure changes.
-    _SCHEMA_VERSION = 1
+    # ``migrations._MIGRATIONS`` whenever the database structure changes.
+    _SCHEMA_VERSION = 2
 
     # Default number of timestamped backup files to keep.
     _DEFAULT_BACKUP_KEEP = 5
@@ -62,7 +66,6 @@ class Storage(
 
     def __init__(self, db_path: Path) -> None:
         TimerStateMixin.__init__(self)
-        ActivityLogMixin.__init__(self)
         ProjectMixin.__init__(self)
         SubActivityMixin.__init__(self)
         TimeLogMixin.__init__(self)
@@ -169,8 +172,13 @@ class Storage(
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _sanitize_elapsed_for_write(value: object, field_name: str) -> float:
-        """Return a safe non-negative finite float for DB writes."""
+    def _sanitize_elapsed_for_write(value: object, field_name: str) -> int:
+        """Return a safe non-negative whole-second integer for DB writes.
+
+        Fractional inputs are rounded down (``int(...)``) so a partial tick
+        never inflates persisted totals.  Invalid or negative values are
+        coerced to ``0`` with a warning rather than raising.
+        """
         try:
             if isinstance(value, bool):
                 raise ValueError("bool is not a valid elapsed value")
@@ -179,15 +187,15 @@ class Storage(
             else:
                 raise TypeError("unsupported elapsed value type")
         except (TypeError, ValueError):
-            logger.warning("Invalid %s %r, writing 0.0", field_name, value)
-            return 0.0
+            logger.warning("Invalid %s %r, writing 0", field_name, value)
+            return 0
         if math.isnan(elapsed) or math.isinf(elapsed) or elapsed < 0:
-            logger.warning("Invalid %s %r, writing 0.0", field_name, value)
-            return 0.0
-        return elapsed
+            logger.warning("Invalid %s %r, writing 0", field_name, value)
+            return 0
+        return int(elapsed)
 
     @staticmethod
-    def sanitize_elapsed_for_write(value: object, field_name: str) -> float:
+    def sanitize_elapsed_for_write(value: object, field_name: str) -> int:
         """Public wrapper used by persistence mixins and type protocols."""
         return Storage._sanitize_elapsed_for_write(value, field_name)
 

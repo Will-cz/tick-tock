@@ -152,12 +152,8 @@ def main() -> int:
         retention_days = int(
             config.get_timer_setting("activity_history_retention_days", 3650)
         )
-        max_activity_entries = int(
-            config.get_timer_setting("activity_log_max_entries", 50000)
-        )
         retention_deleted = storage.apply_retention_policy(
             history_days=retention_days,
-            max_activity_entries=max_activity_entries,
         )
         if any(v > 0 for v in retention_deleted.values()):
             logger.info("Retention policy pruned rows: %s", retention_deleted)

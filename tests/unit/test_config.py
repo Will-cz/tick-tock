@@ -636,14 +636,6 @@ class TestConfigSanitization:
         config = Config(config_path=path)
         assert config.get_timer_setting("activity_history_retention_days") == 3650
 
-    def test_invalid_activity_log_max_entries_resets_to_default(self, tmp_path):
-        path = tmp_path / "config.json"
-        path.write_text(
-            json.dumps({"timer_settings": {"activity_log_max_entries": -1}})
-        )
-        config = Config(config_path=path)
-        assert config.get_timer_setting("activity_log_max_entries") == 50000
-
     def test_invalid_ui_prefs_not_dict_resets_to_defaults(self, tmp_path):
         path = tmp_path / "config.json"
         path.write_text(json.dumps({"ui_preferences": "corrupt"}))

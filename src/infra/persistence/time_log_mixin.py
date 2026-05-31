@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import calendar
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, ContextManager, Optional, Protocol, cast
 
 
@@ -219,3 +219,29 @@ class TimeLogMixin:
             end,
             project_ids=project_ids,
         )
+
+    def apply_retention_policy(
+        self: _TimeLogStorage,
+        *,
+        history_days: Optional[int] = None,
+    ) -> dict[str, int]:
+        """Prune historical daily-log rows older than *history_days*.
+
+        Returns a mapping with delete counts per table.
+        """
+        deleted = {"daily_time_log": 0, "daily_sub_time_log": 0}
+        if history_days is None or history_days <= 0:
+            return deleted
+        cutoff_date = (date.today() - timedelta(days=history_days)).isoformat()
+        with self.connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM daily_time_log WHERE date < ?",
+                (cutoff_date,),
+            )
+            deleted["daily_time_log"] = max(0, int(cur.rowcount))
+            cur = conn.execute(
+                "DELETE FROM daily_sub_time_log WHERE date < ?",
+                (cutoff_date,),
+            )
+            deleted["daily_sub_time_log"] = max(0, int(cur.rowcount))
+        return deleted

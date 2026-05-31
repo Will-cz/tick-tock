@@ -88,7 +88,6 @@ class TestExportJson:
         assert data["export_version"] == 1
         assert "projects" in data
         assert "daily_time_log" in data
-        assert "activity_log" in data
         assert "exported_at" in data
 
     def test_export_includes_project_data(self, storage, tmp_path):
@@ -201,7 +200,6 @@ class TestImportJson:
             "daily_time_log": [],
             "daily_sub_time_log": [],
             "sub_activities": [],
-            "activity_log": [],
             # timer_state intentionally omitted
         }
         path = tmp_path / "clear_timer.json"
@@ -290,8 +288,6 @@ class TestImportJson:
                 )
 
         src.save_timer_state(321.0, "paused")
-        for idx in range(250):
-            src.log_activity(f"bulk-{idx}", "Bulk")
 
         export_path = tmp_path / "bulk.json"
         src.export_json(export_path)
@@ -317,10 +313,6 @@ class TestImportJson:
         assert state is not None
         assert state["elapsed_seconds"] == pytest.approx(321.0)
         assert state["state"] == "paused"
-
-        log_rows = dst.get_activity_log(limit=300)
-        assert len(log_rows) == 250
-        assert log_rows[0]["action"] == "bulk-0"
 
     def test_import_rejects_large_payload_with_single_invalid_row(self, tmp_path):
         dst = Storage(tmp_path / "dst_invalid_large.db")
@@ -364,7 +356,6 @@ class TestImportJson:
             "sub_activities": [],
             "daily_time_log": daily_rows,
             "daily_sub_time_log": [],
-            "activity_log": [],
             "timer_state": None,
         }
         path = tmp_path / "invalid_large.json"

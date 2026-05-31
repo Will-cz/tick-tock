@@ -70,7 +70,6 @@ class WidgetController:
         with self._state_lock:
             if self._svc is not None:
                 self._svc.save_timer_state(timer.elapsed, "running")
-                self._svc.log_activity("start", self.active_project_name())
             # timer.start() always resets elapsed to 0; start a fresh daily session.
             self.tick_count = 0
             self.last_saved_daily_elapsed = 0.0
@@ -81,7 +80,6 @@ class WidgetController:
         with self._state_lock:
             if self._svc is not None:
                 self._svc.save_timer_state(timer.elapsed, "paused")
-                self._svc.log_activity("pause", self.active_project_name())
             self.flush_daily_at(timer.elapsed)
 
     def on_resumed(self, timer: Timer) -> None:
@@ -89,7 +87,6 @@ class WidgetController:
         with self._state_lock:
             if self._svc is not None:
                 self._svc.save_timer_state(timer.elapsed, "running")
-                self._svc.log_activity("resume", self.active_project_name())
             # Update date in case it changed while paused/stopped.
             self.current_date = datetime.now().strftime("%Y-%m-%d")
             # Anchor daily delta so we only count time from this point forward.
@@ -100,7 +97,6 @@ class WidgetController:
         with self._state_lock:
             if self._svc is not None:
                 self._svc.save_timer_state(timer.elapsed, "stopped")
-                self._svc.log_activity("stop", self.active_project_name())
             # Persist elapsed to the active sub-activity or project.
             self.save_active_elapsed(timer.elapsed)
             # Flush any running segment to today's log.
@@ -111,8 +107,6 @@ class WidgetController:
         with self._state_lock:
             if self._svc is not None:
                 self._svc.clear_timer_state()
-                if not self.switching_project:
-                    self._svc.log_activity("reset", self.active_project_name())
             # Reset the active tracking target's elapsed to zero (user-initiated only).
             if not self.switching_project:
                 self.save_active_elapsed(0.0)

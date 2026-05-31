@@ -15,7 +15,7 @@ class _ProjectStorage(Protocol):
         """Yield a DB connection context."""
         raise NotImplementedError
 
-    def sanitize_elapsed_for_write(self, value: object, field_name: str) -> float:
+    def sanitize_elapsed_for_write(self, value: object, field_name: str) -> int:
         """Validate elapsed values before writing to persistence."""
         raise NotImplementedError
 
