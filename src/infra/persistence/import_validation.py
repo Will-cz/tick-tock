@@ -61,14 +61,6 @@ class TimerStateImportRow(TypedDict):
     saved_at: str
 
 
-class ActivityLogImportRow(TypedDict):
-    """Validated activity-log row."""
-
-    timestamp: str
-    action: str
-    project: str
-
-
 class ValidatedImportPayload(TypedDict):
     """Normalized, validated payload returned by import validation."""
 
@@ -77,7 +69,6 @@ class ValidatedImportPayload(TypedDict):
     daily_time_log: list[DailyTimeLogImportRow]
     daily_sub_time_log: list[DailySubTimeLogImportRow]
     timer_state: Optional[TimerStateImportRow]
-    activity_log: list[ActivityLogImportRow]
 
 
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
@@ -331,32 +322,10 @@ def validate_import_payload(
         }
 
     activity_raw = payload.get("activity_log", [])
-    if not isinstance(activity_raw, list):
+    if activity_raw and not isinstance(activity_raw, list):
         raise ValueError("Invalid export file: 'activity_log' must be a list")
-    activity_items = cast(list[object], activity_raw)
-    activity_log: list[ActivityLogImportRow] = []
-    for idx, raw in enumerate(activity_items):
-        if not isinstance(raw, dict):
-            raise ValueError(f"Invalid activity_log[{idx}] row")
-        row = cast(dict[str, object], raw)
-        activity_log.append(
-            {
-                "timestamp": _require_iso_datetime(
-                    row.get("timestamp", now_iso),
-                    f"activity_log[{idx}].timestamp",
-                ),
-                "action": _validate_text(
-                    row.get("action", ""),
-                    field_name=f"activity_log[{idx}].action",
-                    max_length=64,
-                ),
-                "project": _validate_text(
-                    row.get("project", "default"),
-                    field_name=f"activity_log[{idx}].project",
-                    max_length=120,
-                ),
-            }
-        )
+    # activity_log is no longer persisted; the field is accepted for
+    # backward compatibility with older exports but discarded.
 
     return {
         "projects": projects,
@@ -364,5 +333,4 @@ def validate_import_payload(
         "daily_time_log": daily_time_log,
         "daily_sub_time_log": daily_sub_time_log,
         "timer_state": timer_state,
-        "activity_log": activity_log,
     }

@@ -52,7 +52,9 @@ class TestSettingsDialog:
 
     def test_title_icon_matches_main_settings_icon(self, dlg: SettingsDialog):
         assert dlg._title_icon_label is not None
-        assert dlg._title_icon_label.cget("text") == "⚙"
+        # Segoe MDL2 Assets "Setting" gear glyph (E713) — matches the
+        # main widget's title-bar settings button.
+        assert dlg._title_icon_label.cget("text") == "\ue713"
 
     def test_custom_section_hidden_for_non_custom(self, dlg: SettingsDialog):
         dlg._theme_var.set("matrix")

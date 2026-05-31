@@ -45,6 +45,7 @@ class MinimizedWidget(DragMixin):
         on_sub_switch: Callable[[int], None],
         on_maximize: Callable[[int, int], None],
         active_sub_id_getter: Optional[Callable[[], Optional[int]]] = None,
+        today_total_getter: Optional[Callable[[], float]] = None,
         start_x: int = 0,
         start_y: int = 0,
     ) -> None:
@@ -58,6 +59,7 @@ class MinimizedWidget(DragMixin):
         self._on_sub_switch = on_sub_switch
         self._on_maximize = on_maximize
         self._get_active_sub_id = active_sub_id_getter or (lambda: None)
+        self._get_today_total = today_total_getter
 
         self._clock_job: Optional[str] = None
         self._drag_pending_job: Optional[str] = None
@@ -318,10 +320,18 @@ class MinimizedWidget(DragMixin):
         self._clock_job = win.after(1000, self._tick)
 
     def refresh_display(self) -> None:
-        """Refresh elapsed label and toggle button from current timer state."""
+        """Refresh elapsed label and toggle button from current timer state.
+
+        The elapsed label shows today's total for the active project
+        (persisted today-base + any live in-progress delta), not the
+        lifetime timer value.
+        """
         t = self._theme
         state = self._timer.state
-        elapsed = self._timer.elapsed
+        if self._get_today_total is not None:
+            elapsed = float(self._get_today_total())
+        else:
+            elapsed = self._timer.elapsed
         poc_stop_red = "#FF4444"
 
         if self._elapsed_lbl:
@@ -439,6 +449,7 @@ class MinimizedWidget(DragMixin):
                 label = p.alias if p.alias else p.name
                 if label == selected:
                     self._on_project_switch(p.project_id)
+                    self._auto_start_after_select()
                     break
 
     def _on_activity_select(self, _event: "tk.Event") -> None:
@@ -453,12 +464,19 @@ class MinimizedWidget(DragMixin):
         selected = combo.get()
         if selected == self._PROJECT_LEVEL_LABEL:
             self._on_project_switch(active.project_id)
+            self._auto_start_after_select()
             return
         subs = self._storage.list_sub_activities(active.project_id)
         for row in subs:
             if row["name"] == selected and not row["archived"]:
                 self._on_sub_switch(row["id"])
+                self._auto_start_after_select()
                 break
+
+    def _auto_start_after_select(self) -> None:
+        """Start the timer after a combobox selection if not already running."""
+        if self._timer.state != TimerState.RUNNING:
+            self._on_toggle()
 
     def _maximize(self) -> None:
         win = self._win

@@ -33,7 +33,7 @@ class TestSchemaVersioning:
                     "SELECT version FROM schema_migrations"
                 ).fetchall()
             }
-        assert applied == {1}
+        assert applied == {1, 2}
 
     def test_migrations_table_has_applied_at(self, storage):
         with closing(sqlite3.connect(storage._db_path)) as conn:
@@ -44,7 +44,7 @@ class TestSchemaVersioning:
         assert row[0]
 
     def test_schema_version_constant(self):
-        assert Storage._SCHEMA_VERSION == 1
+        assert Storage._SCHEMA_VERSION == 2
 
     def test_migrations_are_idempotent(self, tmp_path):
         db_path = tmp_path / "idempotent.db"

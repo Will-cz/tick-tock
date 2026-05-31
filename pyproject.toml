@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tick-tock"
-version = "0.1.0"
+version = "0.2.0"
 description = "Personal time tracking desktop application for Windows"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }

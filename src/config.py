@@ -72,7 +72,6 @@ class Config:
             "time_format": "24h",
             "max_backup_files": 5,
             "activity_history_retention_days": 3650,
-            "activity_log_max_entries": 50000,
         },
     }
 

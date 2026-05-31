@@ -192,7 +192,8 @@ class TestTimerStateValidation:
     def test_valid_data_is_unchanged(self, storage):
         storage.save_timer_state(123.4, "paused")
         state = storage.load_timer_state()
-        assert state["elapsed_seconds"] == pytest.approx(123.4)
+        # Seconds are persisted as INTEGER; fractional input is truncated.
+        assert state["elapsed_seconds"] == 123
         assert state["state"] == "paused"
 
 

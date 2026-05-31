@@ -71,47 +71,45 @@ def test_get_date_range_sub_activity_data_returns_empty_for_invalid_inputs(
     )
 
 
-def test_import_json_appends_activity_log_entries(
+def test_import_json_drops_activity_log_entries(
     storage: Storage, tmp_path: Path
 ) -> None:
+    # Activity log is no longer persisted; legacy exports with activity_log
+    # should be accepted (field discarded silently).
     src = Storage(tmp_path / "src_extra.db")
-    src.log_activity("start", "Alpha")
+    src.create_project("Alpha", "")
     export_path = tmp_path / "act_export.json"
     src.export_json(export_path)
 
+    # Confirm export does not include activity_log.
+    import json as _json
+
+    payload = _json.loads(export_path.read_text(encoding="utf-8"))
+    assert "activity_log" not in payload
+
     storage.import_json(export_path)
-    entries = storage.get_activity_log(limit=10)
-    assert any(e["action"] == "start" and e["project"] == "Alpha" for e in entries)
+    names = [p["name"] for p in storage.list_projects()]
+    assert "Alpha" in names
 
 
-def test_rebased_schema_trims_legacy_markers(tmp_path: Path) -> None:
+def test_rebased_schema_preserves_existing_migration_markers(tmp_path: Path) -> None:
+    # When opening a DB that already records all migrations, Storage should
+    # leave the markers intact and not re-run migrations.
     db_path = tmp_path / "legacy.db"
+    Storage(db_path)
     with closing(sqlite3.connect(db_path)) as conn:
-        conn.execute(
-            """
-            CREATE TABLE schema_migrations (
-                version INTEGER PRIMARY KEY,
-                applied_at TEXT NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            "INSERT INTO schema_migrations (version, applied_at) VALUES (1, 'now')"
-        )
-        conn.execute(
-            "INSERT INTO schema_migrations (version, applied_at) VALUES (2, 'now')"
-        )
-        conn.execute(
-            "INSERT INTO schema_migrations (version, applied_at) VALUES (3, 'now')"
-        )
-        conn.commit()
+        first_versions = {
+            row[0] for row in conn.execute("SELECT version FROM schema_migrations")
+        }
 
     Storage(db_path)
     with closing(sqlite3.connect(db_path)) as conn:
-        versions = {
+        second_versions = {
             row[0] for row in conn.execute("SELECT version FROM schema_migrations")
         }
-    assert versions == {1}
+
+    assert first_versions == second_versions
+    assert second_versions == {1, 2}
 
 
 def test_apply_retention_policy_prunes_old_daily_rows(storage: Storage) -> None:
@@ -135,16 +133,10 @@ def test_apply_retention_policy_prunes_old_daily_rows(storage: Storage) -> None:
     assert by_project_recent.get(project_id, 0.0) > 0.0
 
 
-def test_apply_retention_policy_caps_activity_log(storage: Storage) -> None:
-    for idx in range(6):
-        storage.log_activity(f"event-{idx}", "Retention")
-
-    deleted = storage.apply_retention_policy(max_activity_entries=3)
-    assert deleted["activity_log"] == 3
-
-    rows = storage.get_activity_log(limit=20)
-    assert len(rows) == 3
-    assert [r["action"] for r in rows] == ["event-5", "event-4", "event-3"]
+def test_apply_retention_policy_caps_daily_only(storage: Storage) -> None:
+    # Verify the retention dict contains only the daily-table keys.
+    deleted = storage.apply_retention_policy(history_days=30)
+    assert set(deleted.keys()) == {"daily_time_log", "daily_sub_time_log"}
 
 
 def test_get_date_range_data_handles_large_dataset(storage: Storage) -> None:

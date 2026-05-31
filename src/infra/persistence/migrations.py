@@ -9,24 +9,19 @@ from typing import Callable, ContextManager
 
 
 def migration_v1(conn: sqlite3.Connection) -> None:
-    """Baseline schema (replaces former v1-v6 chain)."""
+    """Baseline schema (replaces former v1-v6 chain).
+
+    Seconds columns are declared INTEGER so persisted values are exact
+    whole-second counts.  SQLite uses dynamic typing, but the declared
+    type documents intent and supports future tooling.
+    """
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS timer_state (
             id INTEGER PRIMARY KEY,
-            elapsed_seconds REAL NOT NULL,
+            elapsed_seconds INTEGER NOT NULL,
             state TEXT NOT NULL,
             saved_at TEXT NOT NULL
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS activity_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT NOT NULL,
-            action TEXT NOT NULL,
-            project TEXT NOT NULL DEFAULT 'default'
         )
         """
     )
@@ -36,7 +31,7 @@ def migration_v1(conn: sqlite3.Connection) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             description TEXT NOT NULL DEFAULT '',
-            elapsed_seconds REAL NOT NULL DEFAULT 0.0,
+            elapsed_seconds INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             ref_number TEXT NOT NULL DEFAULT '',
             alias TEXT NOT NULL DEFAULT '',
@@ -59,10 +54,14 @@ def migration_v1(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS daily_time_log (
             date TEXT NOT NULL,
             project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-            seconds REAL NOT NULL DEFAULT 0.0,
+            seconds INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (date, project_id)
         )
         """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_daily_time_project_date"
+        " ON daily_time_log (project_id, date)"
     )
     conn.execute(
         """
@@ -71,7 +70,7 @@ def migration_v1(conn: sqlite3.Connection) -> None:
             project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
             name TEXT NOT NULL,
             description TEXT NOT NULL DEFAULT '',
-            elapsed_seconds REAL NOT NULL DEFAULT 0.0,
+            elapsed_seconds INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             archived INTEGER NOT NULL DEFAULT 0
         )
@@ -91,7 +90,7 @@ def migration_v1(conn: sqlite3.Connection) -> None:
             date TEXT NOT NULL,
             project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
             sub_activity_id INTEGER NOT NULL,
-            seconds REAL NOT NULL DEFAULT 0.0,
+            seconds INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (date, sub_activity_id),
             FOREIGN KEY (sub_activity_id, project_id)
                 REFERENCES sub_activities(id, project_id)
@@ -105,6 +104,20 @@ def migration_v1(conn: sqlite3.Connection) -> None:
     )
 
 
+def migration_v2(conn: sqlite3.Connection) -> None:
+    """Drop the event-stream activity_log table and add daily_time_log index.
+
+    Existing per-day totals already capture every metric the app reports,
+    so the per-event audit log was pure overhead.  Idempotent so it is
+    safe to re-run against a partially-migrated database.
+    """
+    conn.execute("DROP TABLE IF EXISTS activity_log")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_daily_time_project_date"
+        " ON daily_time_log (project_id, date)"
+    )
+
+
 def apply_migrations(
     *,
     connect: Callable[[], ContextManager[sqlite3.Connection]],
@@ -114,6 +127,7 @@ def apply_migrations(
     """Run any schema migrations that have not yet been applied."""
     migrations = [
         (1, "initial schema", migration_v1),
+        (2, "drop activity_log event stream", migration_v2),
     ]
 
     with connect() as conn:
@@ -123,11 +137,6 @@ def apply_migrations(
         }
 
     max_applied = max(applied, default=0)
-    if schema_version == 1 and 1 in applied and max_applied > 1:
-        with connect() as conn:
-            conn.execute("DELETE FROM schema_migrations WHERE version > 1")
-        applied = {1}
-        max_applied = 1
 
     if max_applied > schema_version:
         logger.warning(

@@ -10,7 +10,6 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, ContextManager, Optional, Protocol, cast
 
-from src.infra.persistence.activity_log_mixin import ActivityLogEntry
 from src.infra.persistence.import_validation import (
     ValidatedImportPayload,
     validate_import_payload,
@@ -54,10 +53,6 @@ class _ImportExportStorage(Protocol):
         """Return persisted projects as dictionaries."""
         raise NotImplementedError
 
-    def get_activity_log(self, limit: int = 100) -> list[ActivityLogEntry]:
-        """Return recent activity-log entries."""
-        raise NotImplementedError
-
 
 class ImportExportMixin:
     """Mixin providing JSON export/import methods."""
@@ -65,8 +60,8 @@ class ImportExportMixin:
     def export_json(self: _ImportExportStorage, path: Path) -> None:
         """Export all data to a portable JSON file at *path*.
 
-        The exported file contains projects, daily time log, timer state, and
-        the most recent activity log entries.  It can be re-imported with
+        The exported file contains projects, sub-activities, daily time
+        totals, and the current timer state.  It can be re-imported with
         :meth:`import_json`.
         """
         with self.connect() as conn:
@@ -129,7 +124,6 @@ class ImportExportMixin:
                 }
                 for r in daily_sub_rows
             ],
-            "activity_log": self.get_activity_log(limit=10_000),
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
@@ -181,7 +175,7 @@ class ImportExportMixin:
         """Import data from a JSON file previously created by :meth:`export_json`.
 
         **Replaces** all existing projects and daily time log entries.  Timer
-        state is restored from the file.  Activity log entries are appended.
+        state is restored from the file.
 
         Raises:
             ValueError: if the file is not a valid export.
@@ -272,15 +266,4 @@ class ImportExportMixin:
                 )
             else:
                 conn.execute("DELETE FROM timer_state WHERE id = 1")
-            # Append activity log entries from export.
-            for activity_entry in validated["activity_log"]:
-                conn.execute(
-                    "INSERT INTO activity_log (timestamp, action, project)"
-                    " VALUES (?, ?, ?)",
-                    (
-                        activity_entry["timestamp"],
-                        activity_entry["action"],
-                        activity_entry["project"],
-                    ),
-                )
         logger.info("Data imported from %s", path)

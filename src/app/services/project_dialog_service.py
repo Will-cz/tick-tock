@@ -31,6 +31,14 @@ class ProjectDialogService:
             return {}
         return self._storage.get_daily_seconds_by_project(date_str)
 
+    def get_daily_seconds_by_sub_activity(
+        self, date_str: str, project_id: int
+    ) -> dict[int, float]:
+        """Return ``{sub_activity_id: seconds}`` for *project_id* on *date*."""
+        if self._storage is None:
+            return {}
+        return self._storage.get_daily_seconds_by_sub_activity(date_str, project_id)
+
     def add_sub_activity(
         self, project_id: int, name: str, description: str = ""
     ) -> None:

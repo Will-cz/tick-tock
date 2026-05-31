@@ -216,7 +216,7 @@ class ProjectManagementDialog(BaseDialog):
         list_frame.pack(fill="both", expand=True, padx=8, pady=(4, 4))
         tk.Label(
             list_frame,
-            text="Projects & Sub-Activities:",
+            text="Projects & Activities:",
             bg=bg,
             fg=fg_dim,
             font=("Arial", 9, "bold"),
@@ -383,10 +383,10 @@ class ProjectManagementDialog(BaseDialog):
         alias_entry.pack(side="left", fill="x", expand=True)
         alias_entry.bind("<Return>", lambda _e: self._on_save())
 
-        # Ref #
+        # DZ #
         row_ref = tk.Frame(f, bg=bg)
         row_ref.pack(fill="x", padx=8, pady=2)
-        _lbl(row_ref, "Ref #:").pack(side="left")
+        _lbl(row_ref, "DZ #:").pack(side="left")
         ref_entry = tk.Entry(row_ref, textvariable=self._ref_var, **entry_kw)
         ref_entry.pack(side="left", fill="x", expand=True)
         ref_entry.bind("<Return>", lambda _e: self._on_save())
@@ -828,11 +828,14 @@ class ProjectManagementDialog(BaseDialog):
 
             if not self._svc.available or not is_expanded:
                 continue
+            sub_today_map = self._svc.get_daily_seconds_by_sub_activity(
+                today, p.project_id
+            )
             for row in self._svc.list_sub_activities(p.project_id):
                 if row["archived"] and not show_arch:
                     continue
                 sa_name = row["name"][:20]
-                sa_elapsed = float(row["elapsed_seconds"])
+                sa_elapsed = float(sub_today_map.get(int(row["id"]), 0.0))
                 if (
                     live_project_id == p.project_id
                     and active_sub_id is not None

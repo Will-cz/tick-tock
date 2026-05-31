@@ -59,10 +59,6 @@ class AppService:
         """Load persisted timer state if available."""
         return self._storage.load_timer_state()
 
-    def log_activity(self, event: str, project_name: str) -> None:
-        """Append an activity-log event for auditing/reporting."""
-        self._storage.log_activity(event, project_name)
-
     # ------------------------------------------------------------------
     # Daily time tracking
     # ------------------------------------------------------------------

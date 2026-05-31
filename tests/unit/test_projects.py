@@ -229,7 +229,8 @@ class TestProjectManagerSaveElapsed:
         pm.save_elapsed(999.5)
         pm2 = ProjectManager(storage)
         assert pm2.active_project is not None
-        assert pm2.active_project.elapsed_seconds == pytest.approx(999.5)
+        # Seconds are persisted as INTEGER; fractional input is truncated.
+        assert pm2.active_project.elapsed_seconds == pytest.approx(999.0)
 
     def test_save_elapsed_no_active_project_is_safe(self, storage):
         # Create a PM with no active project (edge-case: all projects deleted)

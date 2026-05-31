@@ -69,7 +69,6 @@ def test_storage_creates_required_tables(tmp_path: Path) -> None:
     table_names = {row[0] for row in rows}
     required = {
         "timer_state",
-        "activity_log",
         "projects",
         "daily_time_log",
         "sub_activities",

@@ -530,12 +530,15 @@ class TickTockWidget(DragMixin):
 
         settings_btn = tk.Button(
             title_bar,
-            text="⚙",
+            # Segoe MDL2 Assets E713 = Setting gear. Ships on Win10/11
+            # and renders as a proper cog (U+2699 in Segoe UI Symbol
+            # looks like a thin ship's wheel on some systems).
+            text="\ue713",
             bg=t.btn_bg,
             fg=t.fg_dim,
             activebackground=t.btn_active,
             activeforeground=t.fg,
-            font=("Arial", 10),
+            font=("Segoe MDL2 Assets", 12),
             bd=0,
             width=2,
             command=self._open_settings_dialog,
@@ -1151,6 +1154,7 @@ class TickTockWidget(DragMixin):
             on_sub_switch=self._on_tree_select_sub_activity,
             on_maximize=self._restore,
             active_sub_id_getter=lambda: self._active_sub_activity_id,
+            today_total_getter=self.get_today_display_total,
             start_x=x,
             start_y=y,
         )
@@ -1399,6 +1403,41 @@ class TickTockWidget(DragMixin):
     # Wall-clock jump (seconds) that indicates a system sleep/wake event.
     _SLEEP_DETECT_THRESHOLD = 5.0
 
+    def _reassert_window_visibility_after_wake(self) -> None:
+        """Re-enforce window visibility invariants after a sleep/wake event.
+
+        Invariant: the main root window and the compact mini widget are
+        never visible at the same time. After a Windows suspend/resume
+        cycle, Tk sometimes restores a previously-withdrawn root window,
+        producing two simultaneously visible application windows. This
+        method detects that condition and re-applies the intended state.
+        """
+        root = self._root
+        if root is None:
+            return
+        try:
+            root_state = root.state()
+        except tk.TclError:
+            return
+        mini = self._minimized_widget
+        mini_alive = False
+        if mini is not None:
+            mini_win = getattr(mini, "_win", None)
+            try:
+                mini_alive = bool(mini_win is not None and mini_win.winfo_exists())
+            except tk.TclError:
+                mini_alive = False
+        if mini_alive and root_state != "withdrawn":
+            try:
+                root.withdraw()
+            except tk.TclError:
+                pass
+        elif not mini_alive and mini is not None:
+            # Stale reference: mini window was destroyed by the OS but the
+            # back-reference was not cleared. Clear it so future restores
+            # behave correctly.
+            self._minimized_widget = None
+
     def _tick_clock(self) -> None:
         root = self._root
         if root is None:
@@ -1410,16 +1449,19 @@ class TickTockWidget(DragMixin):
         # threshold between two consecutive ticks the system likely slept.
         if self._last_tick_wall_time is not None:
             gap = (now - self._last_tick_wall_time).total_seconds()
-            if (
-                gap > self._SLEEP_DETECT_THRESHOLD
-                and self._timer.state == TimerState.RUNNING
-            ):
-                logger.info(
-                    "System sleep/wake detected (gap %.1fs) — pausing timer.", gap
-                )
-                # Preserve elapsed at the last known active value so a long
-                # suspend gap is never counted as worked time.
-                self._timer.pause(preserve_elapsed=True)
+            if gap > self._SLEEP_DETECT_THRESHOLD:
+                if self._timer.state == TimerState.RUNNING:
+                    logger.info(
+                        "System sleep/wake detected (gap %.1fs) — pausing timer.",
+                        gap,
+                    )
+                    # Preserve elapsed at the last known active value so a long
+                    # suspend gap is never counted as worked time.
+                    self._timer.pause(preserve_elapsed=True)
+                # Re-assert window visibility: Windows can occasionally
+                # restore a withdrawn Tk root after resume, leaving both the
+                # main window and the compact mini visible at the same time.
+                self._reassert_window_visibility_after_wake()
         self._last_tick_wall_time = now
 
         # Handle midnight date change while timer is running
@@ -1716,6 +1758,16 @@ class TickTockWidget(DragMixin):
         if active_project is None:
             return
 
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        today_by_sub: dict[int, float] = {}
+        if self._storage is not None:
+            today_by_sub = self._storage.get_daily_seconds_by_sub_activity(
+                today_str, active_project.project_id
+            )
+        _live_pid, live_delta = self._get_live_daily_segment()
+        if _live_pid != active_project.project_id:
+            live_delta = 0.0
+
         rows = build_sub_activity_tree_rows(
             sub_rows=(
                 self._app_service.list_sub_activities(active_project.project_id)
@@ -1725,6 +1777,8 @@ class TickTockWidget(DragMixin):
             project_id=active_project.project_id,
             active_sub_activity_id=self._active_sub_activity_id,
             timer_state=self._timer.state,
+            today_seconds_by_sub=today_by_sub,
+            live_active_delta=live_delta,
         )
 
         for row in rows:
@@ -1848,12 +1902,21 @@ class TickTockWidget(DragMixin):
         self._projects_tree_iids.clear()
 
         active = self._project_mgr.active_project
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        today_by_project: dict[int, float] = {}
+        if self._storage is not None:
+            today_by_project = self._storage.get_daily_seconds_by_project(today_str)
+        _live_pid, live_delta = self._get_live_daily_segment()
+        if active is None or _live_pid != active.project_id:
+            live_delta = 0.0
+
         rows = build_project_tree_rows(
             projects=self._project_mgr.projects,
             active_project_id=(active.project_id if active is not None else None),
             active_sub_activity_id=self._active_sub_activity_id,
             timer_state=self._timer.state,
-            timer_elapsed=self._timer.elapsed,
+            today_seconds_by_project=today_by_project,
+            live_active_delta=live_delta,
         )
 
         for row in rows:
@@ -1904,12 +1967,22 @@ class TickTockWidget(DragMixin):
             return
 
         active = self._project_mgr.active_project
+        active_pid = active.project_id if active is not None else None
+        today_base = 0.0
+        if active_pid is not None and self._storage is not None:
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            today_base = self._storage.get_daily_total(today_str, project_id=active_pid)
+        _live_pid, live_delta = self._get_live_daily_segment()
+        if _live_pid != active_pid:
+            live_delta = 0.0
+
         update = resolve_projects_tree_live_update(
             panel_tab=self._panel_tab,
             project_tree_iids=self._projects_tree_iids,
-            active_project_id=(active.project_id if active is not None else None),
+            active_project_id=active_pid,
             timer_state=self._timer.state,
-            timer_elapsed=self._timer.elapsed,
+            today_base_seconds=today_base,
+            live_active_delta=live_delta,
         )
         if update is None:
             return
@@ -1929,11 +2002,31 @@ class TickTockWidget(DragMixin):
         if self._tree is None:
             return
 
+        today_base = 0.0
+        active_pid: Optional[int] = None
+        if (
+            self._active_sub_activity_id is not None
+            and self._project_mgr is not None
+            and self._storage is not None
+        ):
+            active = self._project_mgr.active_project
+            active_pid = active.project_id if active is not None else None
+            if active_pid is not None:
+                today_str = datetime.now().strftime("%Y-%m-%d")
+                today_map = self._storage.get_daily_seconds_by_sub_activity(
+                    today_str, active_pid
+                )
+                today_base = float(today_map.get(self._active_sub_activity_id, 0.0))
+        _live_pid, live_delta = self._get_live_daily_segment()
+        if _live_pid != active_pid:
+            live_delta = 0.0
+
         update = resolve_sub_activity_tree_live_update(
             sub_tree_iids=self._sub_tree_iids,
             active_sub_activity_id=self._active_sub_activity_id,
             timer_state=self._timer.state,
-            timer_elapsed=self._timer.elapsed,
+            today_base_seconds=today_base,
+            live_active_delta=live_delta,
         )
         if update is None:
             return
@@ -1965,7 +2058,11 @@ class TickTockWidget(DragMixin):
             self._title_icon_label.config(fg=selector_state.title_color)
 
     def _on_combobox_project_select(self, _event: "tk.Event[tk.Misc]") -> None:
-        """Handle the user selecting a project from the dropdown combobox."""
+        """Handle the user selecting a project from the dropdown combobox.
+
+        Selecting a project from the combobox also auto-starts the timer
+        so the user does not need a separate click on the Start button.
+        """
         combo = self._project_combobox
         if combo is None or self._project_mgr is None:
             return
@@ -1975,6 +2072,8 @@ class TickTockWidget(DragMixin):
         )
         if selected_project_id is not None:
             self._on_project_switch(selected_project_id)
+            if self._timer.state != TimerState.RUNNING:
+                self._on_toggle()
 
     def _on_opacity_change(self, value: str) -> None:
         """Adjust window transparency live and persist the preference."""
@@ -2126,6 +2225,16 @@ class TickTockWidget(DragMixin):
         """Refresh the 'Today: HH:MM:SS' label with live running total."""
         if self._today_label is None or self._app_service is None:
             return
+        total = self.get_today_display_total()
+        self._today_label.config(text=format_elapsed(total, pad_hours=True))
+
+    def get_today_display_total(self) -> float:
+        """Return today's display total (persisted base + live in-progress delta).
+
+        Returns ``0.0`` when no app service or active project is available.
+        """
+        if self._app_service is None:
+            return 0.0
         active_project_id: Optional[int] = None
         if (
             self._project_mgr is not None
@@ -2137,13 +2246,12 @@ class TickTockWidget(DragMixin):
             app_service=self._app_service,
             active_project_id=active_project_id,
         )
-        total = compute_today_display_total(
+        return compute_today_display_total(
             cache=self._today_cache,
             timer_running=self._timer.state == TimerState.RUNNING,
             timer_elapsed=self._timer.elapsed,
             last_saved_daily_elapsed=self._controller.get_last_saved_daily_elapsed(),
         )
-        self._today_label.config(text=format_elapsed(total, pad_hours=True))
 
     def _refresh_today_base_total(self, *, force: bool = False) -> None:
         """Refresh cached persisted active-project total for today when needed."""
@@ -2250,5 +2358,8 @@ class TickTockWidget(DragMixin):
                 self._stop_btn.config(state="disabled")
             else:
                 self._stop_btn.config(state="normal")
-        # Keep tree action column in sync with timer state
+        # Keep tree action columns in sync with timer state immediately so
+        # the play/pause glyph updates on click rather than on the next 1s
+        # clock tick.
         self._update_tree_active_time()
+        self._update_projects_tree_times()

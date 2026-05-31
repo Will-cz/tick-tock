@@ -163,7 +163,7 @@ Build outputs:
 
 Packaging note:
 
-- Version `0.1.0` is currently packaged with a prototype default runtime mode for alpha delivery.
+- Version `0.2.0` is currently packaged with a prototype default runtime mode for alpha delivery.
 - Other versions default packaged runtime mode to `prod`.
 
 ## Development Notes

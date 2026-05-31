@@ -37,7 +37,8 @@ class TestTimerState:
         storage.save_timer_state(elapsed=123.5, state="stopped")
         result = storage.load_timer_state()
         assert result is not None
-        assert result["elapsed_seconds"] == pytest.approx(123.5)
+        # Seconds are persisted as INTEGER; fractional input is truncated.
+        assert result["elapsed_seconds"] == 123
 
     def test_save_and_load_state(self, storage):
         storage.save_timer_state(elapsed=0.0, state="paused")
@@ -61,48 +62,6 @@ class TestTimerState:
 
     def test_clear_when_empty_is_safe(self, storage):
         storage.clear_timer_state()  # should not raise
-
-
-class TestActivityLog:
-    def test_log_activity_stores_entry(self, storage):
-        storage.log_activity("start")
-        log = storage.get_activity_log()
-        assert len(log) == 1
-        assert log[0]["action"] == "start"
-
-    def test_log_activity_default_project(self, storage):
-        storage.log_activity("pause")
-        assert storage.get_activity_log()[0]["project"] == "default"
-
-    def test_log_activity_custom_project(self, storage):
-        storage.log_activity("stop", project="MyProject")
-        assert storage.get_activity_log()[0]["project"] == "MyProject"
-
-    def test_log_multiple_activities(self, storage):
-        storage.log_activity("start")
-        storage.log_activity("pause")
-        storage.log_activity("stop")
-        log = storage.get_activity_log()
-        assert len(log) == 3
-
-    def test_get_activity_log_newest_first(self, storage):
-        storage.log_activity("start")
-        storage.log_activity("stop")
-        log = storage.get_activity_log()
-        assert log[0]["action"] == "stop"
-        assert log[1]["action"] == "start"
-
-    def test_get_activity_log_limit(self, storage):
-        for _ in range(10):
-            storage.log_activity("tick")
-        assert len(storage.get_activity_log(limit=3)) == 3
-
-    def test_activity_timestamp_is_populated(self, storage):
-        storage.log_activity("start")
-        assert storage.get_activity_log()[0]["timestamp"] != ""
-
-    def test_empty_log_returns_empty_list(self, storage):
-        assert storage.get_activity_log() == []
 
 
 class TestDailyTimeLog:
