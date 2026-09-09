@@ -20,6 +20,7 @@ ENV/
 # Packaging/build outputs
 build/
 dist/
+deliveries/
 *.egg-info/
 .eggs/
 pip-wheel-metadata/
